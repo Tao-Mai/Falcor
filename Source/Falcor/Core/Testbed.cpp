@@ -128,12 +128,19 @@ void Testbed::frame()
     if (mpSwapchain)
     {
         int imageIndex = mpSwapchain->acquireNextImage();
-        FALCOR_ASSERT(imageIndex >= 0 && imageIndex < (int)mpSwapchain->getDesc().imageCount);
-        Texture* pSwapchainImage = mpSwapchain->getImage(imageIndex).get();
-        pRenderContext->copyResource(pSwapchainImage, mpTargetFBO->getColorTexture(0).get());
-        pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
-        pRenderContext->submit();
-        mpSwapchain->present();
+        if (imageIndex < 0)
+        {
+            const auto size = mpWindow->getClientAreaSize();
+            mpSwapchain->resize(size.x, size.y);
+        }
+        else
+        {
+            Texture* pSwapchainImage = mpSwapchain->getImage(imageIndex).get();
+            pRenderContext->copyResource(pSwapchainImage, mpTargetFBO->getColorTexture(0).get());
+            pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
+            pRenderContext->submit();
+            mpSwapchain->present();
+        }
     }
 
     mpDevice->endFrame();

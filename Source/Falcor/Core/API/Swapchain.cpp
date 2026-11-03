@@ -61,7 +61,7 @@ Swapchain::Swapchain(ref<Device> pDevice, const Desc& desc, WindowHandle windowH
 
 const ref<Texture>& Swapchain::getImage(uint32_t index) const
 {
-    FALCOR_ASSERT(index <= mImages.size());
+    FALCOR_CHECK(index < mImages.size(), "Swapchain image index {} is out of range ({} images).", index, mImages.size());
     return mImages[index];
 }
 
@@ -83,6 +83,8 @@ void Swapchain::resize(uint32_t width, uint32_t height)
     mImages.clear();
     mpDevice->wait();
     FALCOR_GFX_CALL(mGfxSwapchain->resize(width, height));
+    mDesc.width = mGfxSwapchain->getDesc().width;
+    mDesc.height = mGfxSwapchain->getDesc().height;
     prepareImages();
 }
 

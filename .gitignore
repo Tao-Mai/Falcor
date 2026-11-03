@@ -8,6 +8,7 @@
 # Media folders.
 /media
 /media_internal
+/resource/
 
 # Packman folders.
 /external/packman/
@@ -36,3 +37,6 @@
 token.txt
 
 customjob.yml
+
+.idea
+AGENTS.md

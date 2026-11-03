@@ -518,12 +518,22 @@ void SampleApp::renderFrame()
     if (mpSwapchain)
     {
         int imageIndex = mpSwapchain->acquireNextImage();
-        FALCOR_ASSERT(imageIndex >= 0 && imageIndex < (int)mpSwapchain->getDesc().imageCount);
-        const Texture* pSwapchainImage = mpSwapchain->getImage(imageIndex).get();
-        pRenderContext->copyResource(pSwapchainImage, mpTargetFBO->getColorTexture(0).get());
-        pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
-        pRenderContext->submit();
-        mpSwapchain->present();
+        if (imageIndex < 0)
+        {
+            // Vulkan can invalidate the swapchain while the first frame is being rendered.
+            // Recreate it and skip presenting this frame, but still finish the device frame below.
+            logInfo("Recreating out-of-date swapchain.");
+            const auto size = mpWindow->getClientAreaSize();
+            mpSwapchain->resize(size.x, size.y);
+        }
+        else
+        {
+            const Texture* pSwapchainImage = mpSwapchain->getImage(imageIndex).get();
+            pRenderContext->copyResource(pSwapchainImage, mpTargetFBO->getColorTexture(0).get());
+            pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
+            pRenderContext->submit();
+            mpSwapchain->present();
+        }
     }
 
     mpDevice->endFrame();
