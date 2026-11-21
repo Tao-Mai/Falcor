@@ -27,6 +27,9 @@
  **************************************************************************/
 #include "Falcor.h"
 #include "Mogwai.h"
+#ifdef FALCOR_ENABLE_REMOTE
+#include "RemoteStream.h"
+#endif
 #include "MogwaiSettings.h"
 #include "GlobalState.h"
 #include "Core/AssetResolver.h"
@@ -86,6 +89,9 @@ namespace Mogwai
 
     void Renderer::onShutdown()
     {
+#ifdef FALCOR_ENABLE_REMOTE
+        mpRemoteStream.reset();
+#endif
         resetEditor();
         getDevice()->wait(); // Need to do that because clearing the graphs will try to release some state objects which might be in use
         mGraphs.clear();
@@ -113,6 +119,11 @@ namespace Mogwai
 
         auto regBinding = [this](pybind11::module& m) {this->registerScriptBindings(m); };
         ScriptBindings::registerBinding(regBinding);
+
+#ifdef FALCOR_ENABLE_REMOTE
+        if (mOptions.remotePort)
+            mpRemoteStream = std::make_unique<RemoteStream>(*this, mOptions.remoteBind, mOptions.remotePort);
+#endif
 
         // Load script provided via command line.
         if (!mOptions.scriptFile.empty())
@@ -686,6 +697,11 @@ namespace Mogwai
 
         applyEditorChanges();
 
+#ifdef FALCOR_ENABLE_REMOTE
+        if (mpRemoteStream)
+            mpRemoteStream->pollInput(*pTargetFbo);
+#endif
+
         if (mActiveGraph < mGraphs.size())
         {
             auto& pGraph = mGraphs[mActiveGraph].pGraph;
@@ -760,6 +776,10 @@ namespace Mogwai
         }
 
         endFrame(pRenderContext, pTargetFbo);
+#ifdef FALCOR_ENABLE_REMOTE
+        if (mpRemoteStream)
+            mpRemoteStream->sendFrame(*pRenderContext, *pTargetFbo->getColorTexture(0));
+#endif
     }
 
     bool Renderer::onMouseEvent(const MouseEvent& mouseEvent)
@@ -873,6 +893,10 @@ int runMain(int argc, char** argv)
     args::Flag listGPUsFlag(parser, "", "List available GPUs", {"list-gpus"});
     args::ValueFlag<uint32_t> gpuFlag(parser, "index", "Select specific GPU to use", {"gpu"});
     args::Flag headlessFlag(parser, "", "Start without opening a window and handling user input.", {"headless"});
+#ifdef FALCOR_ENABLE_REMOTE
+    args::ValueFlag<uint32_t> remotePortFlag(parser, "port", "Stream the headless viewport and receive input on this TCP port.", {"remote-port"});
+    args::ValueFlag<std::string> remoteBindFlag(parser, "IPv4", "Remote preview bind address (default: 127.0.0.1).", {"remote-bind"});
+#endif
     args::ValueFlag<std::string> scriptFlag(parser, "path", "Python script file to run.", {'s', "script"});
     args::Flag deferredFlag(parser, "deferred", "The script is loaded deferred.", {"deferred"});
     args::ValueFlag<std::string> sceneFlag(parser, "path", "Scene file (for example, a .pyscene file) to open.", { 'S', "scene" });
@@ -1001,6 +1025,23 @@ int runMain(int argc, char** argv)
     if (silentFlag) options.silentMode = true;
     if (useSceneCacheFlag) options.useSceneCache = true;
     if (rebuildSceneCacheFlag) options.rebuildSceneCache = true;
+
+#ifdef FALCOR_ENABLE_REMOTE
+    if (remotePortFlag)
+    {
+        const uint32_t port = args::get(remotePortFlag);
+        if (port == 0 || port > 65535)
+        {
+            std::cerr << "The remote preview port must be between 1 and 65535." << std::endl;
+            return 1;
+        }
+        options.remotePort = uint16_t(port);
+        if (remoteBindFlag)
+            options.remoteBind = args::get(remoteBindFlag);
+        config.headless = true;
+        config.showUI = false;
+    }
+#endif
 
     Mogwai::Renderer renderer(config, options);
     return renderer.run();

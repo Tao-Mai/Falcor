@@ -29,6 +29,9 @@ set(FALCOR_USE_SYSTEM_PYTHON OFF CACHE BOOL "Use system Python distribution")
 # Enable/disable USD.
 set(FALCOR_ENABLE_USD ON CACHE BOOL "Enable USD")
 
+# Build the Linux remote preview server and viewer.
+option(FALCOR_ENABLE_REMOTE "Enable Mogwai remote preview" OFF)
+
 
 # Enable/disable Address Sanitizer.
 set(FALCOR_ENABLE_ASAN OFF CACHE BOOL "Enable Address Sanitizer")
@@ -432,6 +435,12 @@ endif()
 
 add_subdirectory(Source/Falcor)
 add_subdirectory(Source/Modules)
+if(FALCOR_ENABLE_REMOTE)
+    if(NOT FALCOR_LINUX OR NOT FALCOR_HAS_CUDA)
+        message(FATAL_ERROR "Mogwai remote preview requires Linux and CUDA support.")
+    endif()
+    add_subdirectory(Source/Remote)
+endif()
 add_subdirectory(Source/Mogwai)
 add_subdirectory(Source/plugins)
 add_subdirectory(Source/RenderPasses)

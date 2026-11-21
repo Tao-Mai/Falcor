@@ -19,4 +19,10 @@ target_sources(Mogwai PRIVATE
 
 target_link_libraries(Mogwai PRIVATE args)
 
+if(FALCOR_ENABLE_REMOTE)
+    target_sources(Mogwai PRIVATE RemoteStream.cpp RemoteStream.h)
+    target_compile_definitions(Mogwai PRIVATE FALCOR_ENABLE_REMOTE=1)
+    target_link_libraries(Mogwai PRIVATE falcor_remote glfw CUDA::cuda_driver)
+endif()
+
 target_source_group(Mogwai "/")

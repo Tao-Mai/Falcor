@@ -41,6 +41,9 @@ using namespace Falcor;
 
 namespace Mogwai
 {
+#ifdef FALCOR_ENABLE_REMOTE
+    class RemoteStream;
+#endif
     class Renderer;
     class Extension
     {
@@ -87,6 +90,10 @@ namespace Mogwai
             bool silentMode = false;
             bool useSceneCache = false;
             bool rebuildSceneCache = false;
+#ifdef FALCOR_ENABLE_REMOTE
+            uint16_t remotePort = 0;
+            std::string remoteBind = "127.0.0.1";
+#endif
         };
 
         using KeyCallback = std::function<bool(bool pressed, uint32_t key)>;
@@ -218,6 +225,9 @@ namespace Mogwai
         KeyCallback mKeyCallback;
         SceneUpdateCallback mSceneUpdateCallback;
         FILE*       mPipedOutput = nullptr;
+#ifdef FALCOR_ENABLE_REMOTE
+        std::unique_ptr<RemoteStream> mpRemoteStream;
+#endif
 
         // Scripting
         void registerScriptBindings(pybind11::module& m);

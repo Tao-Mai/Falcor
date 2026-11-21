@@ -339,7 +339,8 @@ private:
         return pos;
     }
 
-    static inline bool prepareKeyboardEvent(int key, int action, int modifiers, KeyboardEvent& event)
+public:
+    static bool prepareKeyboardEvent(int key, int action, int modifiers, KeyboardEvent& event)
     {
         if (key == GLFW_KEY_UNKNOWN)
         {
@@ -368,6 +369,11 @@ private:
         return true;
     }
 };
+
+bool Window::translateGlfwKeyEvent(int key, int action, int modifiers, KeyboardEvent& event)
+{
+    return ApiCallbacks::prepareKeyboardEvent(key, action, modifiers, event);
+}
 
 static std::atomic<size_t> sWindowCount;
 

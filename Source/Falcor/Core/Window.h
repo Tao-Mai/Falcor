@@ -164,6 +164,9 @@ public:
      */
     const Desc& getDesc() const { return mDesc; }
 
+    /// Translate GLFW key codes for input coming from a separate viewer.
+    static bool translateGlfwKeyEvent(int key, int action, int modifiers, KeyboardEvent& event);
+
 private:
     friend class ApiCallbacks;
     Window(const Desc& desc, ICallbacks* pCallbacks);

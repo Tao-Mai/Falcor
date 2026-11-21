@@ -58,6 +58,22 @@ Using `--silent` together with `--script` allows to run Mogwai for rendering in 
 
 If you start it without specifying any options, Mogwai starts with a blank screen.
 
+## Interactive remote preview
+
+Open the checkout on the Linux render server in CLion and run **Mogwai Remote**. The configuration builds Mogwai with CUDA and starts the Cornell box at 1920×1080 on port 9000. Set `--script` and `--scene` in the configuration to use a different render graph and scene.
+
+On Windows, copy `tools/remote/FalcorRemoteLauncher.py` once. Run it with 64-bit Python and the same OpenSSH host you use to log into the render server. The viewer uses the local NVIDIA GPU to decode H.264.
+
+```powershell
+py .\FalcorRemoteLauncher.py user@render-server --repo /path/to/Falcor
+```
+
+The default checkout path is `project/rendering/Falcor` relative to the SSH user's home directory. Use `--port` if you change Mogwai's preview port.
+
+The launcher checks the viewer version on each connection and downloads the changed script and requirements over SSH. It installs Python packages into a local cache on first use or when the requirements change. After editing `Source/Remote/viewer.py` on the server, open the launcher again to use the new version. The same SSH connection carries the video and input.
+
+The viewer sends keyboard presses, mouse drags, and wheel events to the active render graph and scene. The first-person camera uses W, A, S, D, Q, and E for movement and left-button drag for rotation.
+
 ## Loading Scripts and Assets
 
 With Mogwai up and running, we'll proceed to loading something. You can load two kinds of files: scripts (which usually contain some global settings and render graphs) and scenes.
