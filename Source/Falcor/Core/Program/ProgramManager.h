@@ -115,6 +115,9 @@ public:
      */
     const std::vector<std::string>& getGlobalCompilerArguments() const { return mGlobalCompilerArguments; }
 
+    /// Opt in to exporting actual compiler inputs. An empty path disables recording.
+    void setShaderCompilationDatabase(const std::filesystem::path& path);
+
     /**
      * Enable/disable global generation of shader debug info.
      * @param[in] enabled Enable/disable.
@@ -154,6 +157,8 @@ private:
 
     DefineList mGlobalDefineList;
     std::vector<std::string> mGlobalCompilerArguments;
+    std::filesystem::path mShaderCompilationDatabase;
+    mutable std::map<std::string, std::string> mShaderCompilationRecords;
     bool mGenerateDebugInfo = false;
     ForcedCompilerFlags mForcedCompilerFlags;
 

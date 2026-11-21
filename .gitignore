@@ -40,3 +40,8 @@ customjob.yml
 
 .idea
 AGENTS.md
+build
+cmake-build-debug
+media
+resource
+test-results

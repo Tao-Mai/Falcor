@@ -30,7 +30,6 @@
 #include "Utils/Scripting/ScriptBindings.h"
 
 #include <pybind11/pybind11.h>
-
 /**
  * This function checks if the falcor module is loaded from a Falcor
  * application running the embedded python interpreter (e.g. Mogwai).

@@ -1004,6 +1004,11 @@ target_include_directories(Falcor
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Record the toolchain used by this build, including local Slang builds.
+set_property(SOURCE Core/Program/ProgramManager.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "FALCOR_SLANG_COMPILER=\"${FALCOR_SLANG_DIR}/bin/slangc${CMAKE_EXECUTABLE_SUFFIX}\""
+)
+
 set_target_properties(Falcor PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${FALCOR_RUNTIME_OUTPUT_DIRECTORY}
     LIBRARY_OUTPUT_DIRECTORY ${FALCOR_LIBRARY_OUTPUT_DIRECTORY}

@@ -28,8 +28,10 @@
 #include "Falcor.h"
 #include "Mogwai.h"
 #include "MogwaiSettings.h"
+#include "WindowSession.h"
 #include "GlobalState.h"
 #include "Core/AssetResolver.h"
+#include "Core/Program/ProgramManager.h"
 #include "Scene/Importer.h"
 #include "RenderGraph/RenderGraphImportExport.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
@@ -426,7 +428,8 @@ namespace Mogwai
         // Setup graph data.
         data = {};
         data.pGraph = pGraph;
-        data.pGraph->onResize(getTargetFbo().get());
+        updateWorkspaceLayout();
+        data.pGraph->onResize(mpGraphTargetFbo.get());
         data.pGraph->setScene(mpScene);
         if (data.pGraph->getOutputCount() != 0)
         {
@@ -582,7 +585,8 @@ namespace Mogwai
         {
             mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
 
-            const auto& pFbo = getTargetFbo();
+            updateWorkspaceLayout();
+            const auto& pFbo = mpGraphTargetFbo;
             float ratio = float(pFbo->getWidth()) / float(pFbo->getHeight());
             mpScene->setCameraAspectRatio(ratio);
 
@@ -685,6 +689,7 @@ namespace Mogwai
         }
 
         applyEditorChanges();
+        updateWorkspaceLayout();
 
         if (mActiveGraph < mGraphs.size())
         {
@@ -692,11 +697,13 @@ namespace Mogwai
             pGraph->compile(pRenderContext);
         }
 
-        beginFrame(pRenderContext, pTargetFbo);
+        beginFrame(pRenderContext, mpGraphTargetFbo);
 
         // Clear frame buffer.
-        const float4 clearColor(0.38f, 0.52f, 0.10f, 1);
+        const float4 clearColor(0.035f, 0.042f, 0.055f, 1);
         pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
+        if (mpGraphTargetFbo != pTargetFbo)
+            pRenderContext->clearFbo(mpGraphTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
 
         if (mActiveGraph < mGraphs.size())
         {
@@ -728,7 +735,7 @@ namespace Mogwai
             {
                 ref<Texture> pOutTex = pGraph->getOutput(mGraphs[mActiveGraph].mainOutput)->asTexture();
                 FALCOR_ASSERT(pOutTex);
-                pRenderContext->blit(pOutTex->getSRV(), pTargetFbo->getRenderTargetView(0));
+                pRenderContext->blit(pOutTex->getSRV(), mpGraphTargetFbo->getRenderTargetView(0));
             }
 
             if (getSettings().getOption("PipedOutput:enable", false))
@@ -751,15 +758,19 @@ namespace Mogwai
 
                 if (mPipedOutput)
                 {
-                    Falcor::ref<Texture> framebufferTexture = pTargetFbo->getColorTexture(0);
+                    Falcor::ref<Texture> framebufferTexture = mpGraphTargetFbo->getColorTexture(0);
                     uint32_t subresource = framebufferTexture->getSubresourceIndex(0, 0);
                     std::vector<uint8_t> framebufferData = pRenderContext->readTextureSubresource(framebufferTexture.get(), subresource);
-                    fwrite(&framebufferData[0], 4 * pTargetFbo->getWidth() * pTargetFbo->getHeight(), 1, mPipedOutput);
+                    fwrite(&framebufferData[0], 4 * mpGraphTargetFbo->getWidth() * mpGraphTargetFbo->getHeight(), 1, mPipedOutput);
                 }
             }
         }
 
-        endFrame(pRenderContext, pTargetFbo);
+        endFrame(pRenderContext, mpGraphTargetFbo);
+        if (mpGraphTargetFbo != pTargetFbo)
+            pRenderContext->blit(
+                mpGraphTargetFbo->getColorTexture(0)->getSRV(), pTargetFbo->getRenderTargetView(0), RenderContext::kMaxRect, mRenderViewport
+            );
     }
 
     bool Renderer::onMouseEvent(const MouseEvent& mouseEvent)
@@ -769,8 +780,28 @@ namespace Mogwai
             if (pe->mouseEvent(mouseEvent)) return true;
         }
 
-        if (mGraphs.size()) mGraphs[mActiveGraph].pGraph->onMouseEvent(mouseEvent);
-        return mpScene ? mpScene->onMouseEvent(mouseEvent) : false;
+        MouseEvent viewportEvent = mouseEvent;
+        const float2 origin(mRenderViewport.x, mRenderViewport.y);
+        const float2 size(mRenderViewport.z - mRenderViewport.x, mRenderViewport.w - mRenderViewport.y);
+        // Button and wheel events only guarantee normalized window coordinates.
+        const float2 windowSize(getTargetFbo()->getWidth(), getTargetFbo()->getHeight());
+        const float2 position = mouseEvent.pos * windowSize - origin;
+        const bool inside = all(position >= float2(0)) && all(position < size);
+        const uint32_t button = (mouseEvent.type == MouseEvent::Type::ButtonDown || mouseEvent.type == MouseEvent::Type::ButtonUp)
+            ? 1u << uint32_t(mouseEvent.button) : 0;
+        // Continue an existing camera drag outside the viewport, including its release.
+        if (!inside && !mViewportMouseButtons) return false;
+        if (mouseEvent.type == MouseEvent::Type::ButtonDown)
+        {
+            if (!inside) return false;
+            mViewportMouseButtons |= button;
+        }
+        else if (mouseEvent.type == MouseEvent::Type::ButtonUp) mViewportMouseButtons &= ~button;
+        viewportEvent.screenPos = position;
+        viewportEvent.pos = position / max(size, float2(1));
+
+        if (mGraphs.size()) mGraphs[mActiveGraph].pGraph->onMouseEvent(viewportEvent);
+        return mpScene ? mpScene->onMouseEvent(viewportEvent) : false;
     }
 
     bool Renderer::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -807,13 +838,48 @@ namespace Mogwai
 
     void Renderer::onResize(uint32_t width, uint32_t height)
     {
+        updateWorkspaceLayout();
+    }
+
+    void Renderer::updateWorkspaceLayout()
+    {
+        const auto& pTargetFbo = getTargetFbo();
+        const uint32_t width = pTargetFbo->getWidth();
+        const uint32_t height = pTargetFbo->getHeight();
+        uint2 renderSize(width, height);
+        mRenderViewport = uint4(0, 0, width, height);
+        mGraphSidebarRect = uint4(width, 0, width, height);
+
+        if (getWindow())
+        {
+            const float scale = getDisplayScaleFactor();
+            const uint32_t top = isUiEnabled() ? std::min(uint32_t(24.f * scale), height - 1) : 0;
+            const bool showSidebar = isUiEnabled() && mGraphSidebarVisible;
+            const uint32_t minSidebarWidth = showSidebar ? std::min(uint32_t(340.f * scale), width / 2) : 0;
+            const uint32_t availableWidth = width - minSidebarWidth;
+            const uint32_t availableHeight = height - top;
+            const uint32_t side = std::min(availableWidth, availableHeight);
+            // Join the square viewport directly to the menu and sidebar. The sidebar
+            // takes the remaining width instead of leaving gutters around the image.
+            const uint32_t x = showSidebar ? 0 : (availableWidth - side) / 2;
+            const uint32_t y = showSidebar ? top : top + (availableHeight - side) / 2;
+            renderSize = uint2(side);
+            mRenderViewport = uint4(x, y, x + side, y + side);
+            mGraphSidebarRect = uint4(showSidebar ? side : width, top, width, height);
+        }
+
+        // Moving the viewport alone does not invalidate progressive accumulation.
+        if (mpGraphTargetFbo && mpGraphTargetFbo->getWidth() == renderSize.x && mpGraphTargetFbo->getHeight() == renderSize.y)
+            return;
+        mpGraphTargetFbo = getWindow() ? Fbo::create2D(getDevice(), renderSize.x, renderSize.y, pTargetFbo->getDesc()) : pTargetFbo;
+        const float aspectRatio = float(renderSize.x) / float(renderSize.y);
         for (auto& g : mGraphs)
         {
-            g.pGraph->onResize(getTargetFbo().get());
+            g.pGraph->onResize(mpGraphTargetFbo.get());
             ref<Scene> graphScene = g.pGraph->getScene();
-            if (graphScene) graphScene->setCameraAspectRatio((float)width / (float)height);
+            if (graphScene) graphScene->setCameraAspectRatio(aspectRatio);
         }
-        if (mpScene) mpScene->setCameraAspectRatio((float)width / (float)height);
+        if (mpScene) mpScene->setCameraAspectRatio(aspectRatio);
     }
 
     void Renderer::onHotReload(HotReloadFlags reloaded)
@@ -877,6 +943,7 @@ int runMain(int argc, char** argv)
     args::Flag deferredFlag(parser, "deferred", "The script is loaded deferred.", {"deferred"});
     args::ValueFlag<std::string> sceneFlag(parser, "path", "Scene file (for example, a .pyscene file) to open.", { 'S', "scene" });
     args::ValueFlag<std::string> shaderCacheFlag(parser, "shadercache", "Path to the GFX shader cache.", { "shadercache" });
+    args::ValueFlag<std::string> shaderDatabaseFlag(parser, "path", "Export actual shader compiler inputs to a JSON compilation database.", {"shader-compile-db"});
     args::ValueFlag<std::string> logfileFlag(parser, "path", "File to write log into.", {'l', "logfile"});
     args::ValueFlag<int32_t> verbosityFlag(parser, "verbosity", "Logging verbosity (0=disabled, 1=fatal errors, 2=errors, 3=warnings, 4=infos, 5=debugging)", { 'v', "verbosity" }, 4);
     args::Flag silentFlag(parser, "", "Start without opening a window and handling user input (deprecated: use --headless).", {"silent"});
@@ -982,6 +1049,8 @@ int runMain(int argc, char** argv)
         config.deviceDesc.enableRaytracingValidation = true;
 
     config.windowDesc.title = "Mogwai";
+    config.windowDesc.width = 1400;
+    config.windowDesc.height = 980;
     if (widthFlag)
         config.windowDesc.width = args::get(widthFlag);
     if (heightFlag)
@@ -1002,7 +1071,11 @@ int runMain(int argc, char** argv)
     if (useSceneCacheFlag) options.useSceneCache = true;
     if (rebuildSceneCacheFlag) options.rebuildSceneCache = true;
 
+    void* previousInputLayout = config.headless ? nullptr : Mogwai::WindowSession::captureInputLayout();
     Mogwai::Renderer renderer(config, options);
+    if (shaderDatabaseFlag)
+        renderer.getDevice()->getProgramManager()->setShaderCompilationDatabase(args::get(shaderDatabaseFlag));
+    Mogwai::WindowSession windowSession(renderer.getWindow(), previousInputLayout);
     return renderer.run();
 }
 

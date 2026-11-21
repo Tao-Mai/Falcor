@@ -521,9 +521,12 @@ bool GuiImpl::pushWindow(const char label[], bool& open, uint2 size, uint2 pos, 
 
     ImVec2 fPos(pos.x * mScaleFactor, pos.y * mScaleFactor);
     ImVec2 fSize(size.x * mScaleFactor, size.y * mScaleFactor);
-    ImGui::SetNextWindowSize(fSize, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(fPos, ImGuiCond_FirstUseEver);
+    const bool fixed = is_set(flags, Gui::WindowFlags::Fixed);
+    ImGui::SetNextWindowSize(fSize, fixed ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(fPos, fixed ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
     int imguiFlags = 0;
+    if (fixed)
+        imguiFlags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
     if (!is_set(flags, Gui::WindowFlags::ShowTitleBar))
         imguiFlags |= ImGuiWindowFlags_NoTitleBar;
     if (!is_set(flags, Gui::WindowFlags::AllowMove))

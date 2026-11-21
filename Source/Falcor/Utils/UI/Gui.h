@@ -104,6 +104,7 @@ public:
         CloseButton = 0x8,  ///< Add a close button
         NoResize = 0x10,    ///< Disable manual resizing
         AutoResize = 0x20,  ///< Auto resize the window to fit it's content every frame
+        Fixed = 0x40,       ///< Apply position and size every frame; disable moving, resizing, docking, and saved layout
 
         Default = ShowTitleBar | AllowMove | SetFocus | CloseButton
     };

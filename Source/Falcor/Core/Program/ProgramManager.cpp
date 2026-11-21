@@ -32,6 +32,12 @@
 #include "Utils/Timing/CpuTimer.h"
 
 #include <slang.h>
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <chrono>
+#if FALCOR_WINDOWS
+#include <Windows.h>
+#endif
 
 namespace Falcor
 {
@@ -620,6 +626,18 @@ ProgramManager::ForcedCompilerFlags ProgramManager::getForcedCompilerFlags()
     return mForcedCompilerFlags;
 }
 
+void ProgramManager::setShaderCompilationDatabase(const std::filesystem::path& path)
+{
+    mShaderCompilationDatabase = path.empty() ? path : std::filesystem::absolute(path);
+    mShaderCompilationRecords.clear();
+    if (!mShaderCompilationDatabase.empty() && std::filesystem::exists(mShaderCompilationDatabase))
+    {
+        std::ifstream stream(mShaderCompilationDatabase, std::ios::binary);
+        for (const auto& record : nlohmann::json::parse(stream))
+            mShaderCompilationRecords[nlohmann::json::array({record.at("modules"), record.at("entryPoints")}).dump()] = record.dump();
+    }
+}
+
 SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& program) const
 {
     slang::IGlobalSession* pSlangGlobalSession = mpDevice->getSlangGlobalSession();
@@ -805,6 +823,9 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
             spProcessCommandLineArguments(pSlangRequest, args.data(), (int)args.size());
     }
 
+    // Capture resolved sources at the same point they are submitted to Slang.
+    const bool recordCompilation = !mShaderCompilationDatabase.empty();
+    nlohmann::json modules = nlohmann::json::array();
     for (size_t moduleIndex = 0; moduleIndex < program.mDesc.shaderModules.size(); ++moduleIndex)
     {
         const auto& module = program.mDesc.shaderModules[moduleIndex];
@@ -812,6 +833,8 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
         const char* name = !module.name.empty() ? module.name.c_str() : nullptr;
         int translationUnitIndex = spAddTranslationUnit(pSlangRequest, SLANG_SOURCE_LANGUAGE_SLANG, name);
         FALCOR_ASSERT(translationUnitIndex == moduleIndex);
+
+        nlohmann::json sources = nlohmann::json::array();
 
         for (const auto& source : module.sources)
         {
@@ -834,6 +857,7 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
                     FALCOR_THROW("Can't find shader file {}", path);
                 }
                 spAddTranslationUnitSourceFile(pSlangRequest, translationUnitIndex, fullPath.string().c_str());
+                if (recordCompilation) sources.push_back({{"file", fullPath.generic_string()}});
             }
             else
             {
@@ -841,8 +865,10 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
                 spAddTranslationUnitSourceString(
                     pSlangRequest, translationUnitIndex, source.path.empty() ? "empty" : source.path.string().c_str(), source.string.c_str()
                 );
+                if (recordCompilation) sources.push_back({{"path", source.path.generic_string()}, {"text", source.string}});
             }
         }
+        if (recordCompilation) modules.push_back({{"name", module.name}, {"sources", sources}});
     }
 
     // Now we make a separate pass and add the entry points.
@@ -857,6 +883,74 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
         }
     }
 
+    if (recordCompilation)
+    {
+        try
+        {
+            using nlohmann::json;
+            json arguments = json::array({FALCOR_SLANG_COMPILER, "-profile", getSlangProfileString(program.mDesc.shaderModel),
+                "-target", targetDesc.format == SLANG_DXIL ? "dxil" : "spirv",
+                useColumnMajor ? "-matrix-layout-column-major" : "-matrix-layout-row-major"});
+            for (const auto& path : searchPaths) { arguments.push_back("-I"); arguments.push_back(path); }
+            for (const auto& define : slangDefines)
+            {
+                arguments.push_back("-D");
+                arguments.push_back(std::string(define.name) + "=" + define.value);
+            }
+            for (const auto& arg : mGlobalCompilerArguments) arguments.push_back(arg);
+            for (const auto& arg : program.mDesc.compilerArguments) arguments.push_back(arg);
+            json entryPoints = json::array();
+            std::string file;
+            for (const auto& group : program.mDesc.entryPointGroups)
+            {
+                for (const auto& entry : group.entryPoints)
+                    entryPoints.push_back({{"module", group.shaderModuleIndex}, {"name", entry.name},
+                        {"stage", uint32_t(getSlangStage(entry.type))}});
+                if (file.empty())
+                    for (const auto& source : modules[group.shaderModuleIndex]["sources"])
+                        if (source.contains("file")) { file = source["file"]; break; }
+            }
+            if (file.empty())
+                for (const auto& module : modules)
+                    for (const auto& source : module["sources"])
+                        if (file.empty() && source.contains("file")) file = source["file"];
+            json conformances = json::array();
+            for (const auto& item : program.getTypeConformances())
+                conformances.push_back({{"type", item.first.typeName}, {"interface", item.first.interfaceName}, {"id", item.second}});
+            json compilerOptions = json::array();
+            for (const auto& option : compilerOptionEntries)
+                compilerOptions.push_back({{"name", uint32_t(option.name)}, {"kind", uint32_t(option.value.kind)},
+                    {"intValue0", option.value.intValue0}, {"intValue1", option.value.intValue1},
+                    {"stringValue0", option.value.stringValue0 ? option.value.stringValue0 : ""},
+                    {"stringValue1", option.value.stringValue1 ? option.value.stringValue1 : ""}});
+            json record = {{"directory", std::filesystem::current_path().generic_string()}, {"file", file},
+                {"arguments", arguments}, {"modules", modules}, {"entryPoints", entryPoints},
+                {"typeConformances", conformances}, {"compilerOptions", compilerOptions},
+                {"compilerVersion", pSlangGlobalSession->getBuildTagString()},
+                {"capturedAt", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()}};
+            // Replace an earlier configuration of the same program with its latest runtime state.
+            mShaderCompilationRecords[json::array({modules, entryPoints}).dump()] = record.dump();
+            json records = json::array();
+            for (const auto& item : mShaderCompilationRecords) records.push_back(json::parse(item.second));
+            std::filesystem::create_directories(mShaderCompilationDatabase.parent_path());
+            auto temporary = mShaderCompilationDatabase;
+            temporary += ".tmp";
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            stream.exceptions(std::ios::failbit | std::ios::badbit);
+            stream << records.dump(2) << '\n';
+            stream.close();
+#if FALCOR_WINDOWS
+            if (!MoveFileExW(temporary.c_str(), mShaderCompilationDatabase.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                FALCOR_THROW("Cannot replace shader compilation database {}", mShaderCompilationDatabase);
+#else
+            std::filesystem::rename(temporary, mShaderCompilationDatabase);
+#endif
+        }
+        catch (const std::exception& error)
+        {
+            logWarning("Shader compilation database export failed: {}", error.what());
+        }
+    }
     return pSlangRequest;
 }
 

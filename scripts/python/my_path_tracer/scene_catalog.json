@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "baseline": "Falcor 9.0 native PathTracer: useRTXDI=true, all bounce limits=0, stock RTXDI options",
+  "suites": {
+    "smoke": ["cornell", "arcade"],
+    "restir2020": ["bistro_exterior", "emerald_square", "zero_day", "burger_restaurant", "subway", "soda_hall", "amusement_park"],
+    "paper": ["bistro_exterior", "bistro_interior", "emerald_square", "zero_day", "burger_restaurant", "subway", "soda_hall", "amusement_park"],
+    "all": ["cornell", "arcade", "bistro_exterior", "bistro_interior", "emerald_square", "zero_day", "burger_restaurant", "subway", "soda_hall", "amusement_park"]
+  },
+  "scenes": [
+    {
+      "id": "cornell", "name": "Cornell Box", "root": "repository",
+      "path": "media/test_scenes/cornell_box.pyscene", "source": "https://github.com/NVIDIAGameWorks/Falcor/tree/9.0",
+      "license": "media/LICENSE.md", "papers": [], "reproduction": "Independent validation fixture",
+      "differences": ["Falcor 自带验证场景，不计入论文场景覆盖率。"]
+    },
+    {
+      "id": "arcade", "name": "Arcade", "root": "repository",
+      "path": "media/Arcade/Arcade.pyscene", "source": "https://github.com/NVIDIAGameWorks/Falcor/tree/9.0",
+      "license": "media/LICENSE.md", "papers": [], "reproduction": "Independent validation fixture",
+      "differences": ["Falcor 自带验证场景，保留原有环境、解析光源和发光材质。"]
+    },
+    {
+      "id": "bistro_exterior", "name": "Bistro Exterior", "root": "assets",
+      "camera_clip": {"near_plane": 0.01, "far_plane": 10000.0},
+      "path": "Bistro_v5_2/Bistro_v5_2/BistroExterior.pyscene",
+      "source": "https://developer.nvidia.com/orca/amazon-lumberyard-bistro", "license": "CC-BY-4.0",
+      "archive_sha256": "0d50e3c724c6c5da19f8eb99ad3f53e36fec37ffa2df9621f9ccf0603f3934e1",
+      "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 8 and 11"}, {"title": "Area ReSTIR", "url": "https://graphics.cs.utah.edu/research/projects/area-restir/", "location": "Bistro Exterior comparisons"}],
+      "reproduction": "Reconstructed public asset",
+      "differences": ["ORCA v5.2；使用资产自带相机、环境与灯光，不冒充论文原始相机和场景版本。", "固定相机、无动画、无景深；FBX 导入后的裁剪范围统一设为 0.01 至 10000 米。"]
+    },
+    {
+      "id": "bistro_interior", "name": "Bistro Interior", "root": "assets",
+      "camera_clip": {"near_plane": 0.01, "far_plane": 10000.0},
+      "path": "Bistro_v5_2/Bistro_v5_2/BistroInterior.fbx", "emission_multiplier": 1000.0,
+      "source": "https://developer.nvidia.com/orca/amazon-lumberyard-bistro", "license": "CC-BY-4.0",
+      "archive_sha256": "0d50e3c724c6c5da19f8eb99ad3f53e36fec37ffa2df9621f9ccf0603f3934e1",
+      "papers": [{"title": "Area ReSTIR", "url": "https://graphics.cs.utah.edu/research/projects/area-restir/", "location": "Bistro Interior comparisons"}],
+      "reproduction": "Reconstructed public asset",
+      "differences": ["使用无酒水变体的 FBX；发光强度乘 1000，沿用 ORCA 室内脚本的曝光约定。", "不是 ReSTIR 2020 的 Bistro 夜间室外视角；相机位姿保持导入结果，裁剪范围改为 0.01 至 10000 米。"]
+    },
+    {
+      "id": "emerald_square", "name": "Emerald Square", "root": "assets",
+      "camera_clip": {"near_plane": 0.01, "far_plane": 10000.0},
+      "path": "emerald_square/EmeraldSquare_v4_1/EmeraldSquare_Dusk.pyscene",
+      "source": "https://developer.nvidia.com/orca/nvidia-emerald-square", "license": "CC-BY-NC-SA-3.0",
+      "archive_sha256": "a63d08531c8a3245b722a2407b57385b191064090487ef3fee3c4e796b41e2f6",
+      "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 9 and 11"}, {"title": "Area ReSTIR", "url": "https://graphics.cs.utah.edu/research/projects/area-restir/", "location": "Emerald Square comparisons"}],
+      "reproduction": "Reconstructed public asset",
+      "differences": ["ORCA v4.1 Dusk；沿用资产脚本的夜空和发光强度倍率 5；相机裁剪范围改为 0.01 至 10000 米。", "论文相机、动画、曝光及原始版本未提供，不声明严格复现。"]
+    },
+    {
+      "id": "zero_day", "name": "Zero Day", "root": "assets",
+      "camera_clip": {"near_plane": 0.01, "far_plane": 10000.0},
+      "path": "zero_day/MEASURE_SEVEN/MEASURE_SEVEN_COLORED_LIGHTS.fbx",
+      "source": "https://developer.nvidia.com/orca/beeple-zero-day", "license": "CC-BY-4.0",
+      "archive_sha256": "a9d040fe9720ee88937778659205fd76bad4499431a37156aaeeba382f08d592",
+      "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 1, 8 and 11"}, {"title": "Area ReSTIR", "url": "https://graphics.cs.utah.edu/research/projects/area-restir/", "location": "Zero Day comparisons"}],
+      "reproduction": "Reconstructed public asset",
+      "differences": ["ORCA Measure Seven Colored Lights 静态快照；不复现论文动画或相机轨迹；裁剪范围改为 0.01 至 10000 米。"]
+    },
+    {
+      "id": "burger_restaurant", "name": "Burger Restaurant", "unavailable": "未找到经核实的公开免费原始资产；论文使用商业资产。",
+      "source": "https://benedikt-bitterli.me/restir/", "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 8 and 11"}]
+    },
+    {
+      "id": "subway", "name": "Subway", "unavailable": "未找到经核实的公开免费原始资产；论文使用商业资产。",
+      "source": "https://benedikt-bitterli.me/restir/", "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 8 and 11"}]
+    },
+    {
+      "id": "soda_hall", "name": "Soda Hall", "unavailable": "尚未核实论文采用的场景版本、光源转换和公开下载来源。",
+      "source": "https://benedikt-bitterli.me/restir/", "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figure 11"}]
+    },
+    {
+      "id": "amusement_park", "name": "Amusement Park", "unavailable": "缺少论文原始组合场景；包含商业 Pirate Ship 资产，无法以其他模型替代后声称已覆盖。",
+      "source": "https://benedikt-bitterli.me/restir/", "papers": [{"title": "ReSTIR 2020", "url": "https://benedikt-bitterli.me/restir/", "location": "Figures 1, 10 and 11"}]
+    }
+  ]
+}

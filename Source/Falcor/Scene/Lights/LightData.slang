@@ -32,6 +32,7 @@
 BEGIN_NAMESPACE_FALCOR
 
 /** Types of light sources. Used in LightData structure.
+    不包含环境光，Directional是完全直射，而Distant就有一点圆锥，可以在圆锥上采样
 */
 enum class LightType : uint32_t
 {
@@ -52,7 +53,7 @@ struct LightData
     float3   dirW               = float3(0, -1, 0); ///< World-space orientation of the light source (normalized).
     float    openingAngle       = float(M_PI);      ///< For point (spot) light: Opening half-angle of a spot light cut-off, pi by default (full sphere).
     float3   intensity          = float3(1, 1, 1);  ///< Emitted radiance of th light source
-    float    cosOpeningAngle    = -1.f;             ///< For point (spot) light: cos(openingAngle), -1 by default because openingAngle is pi by default
+    float    cosOpeningAngle    = -1.f;             ///< For point (spot) light: cos(openingAngle), -1 by default because openingAngle is pi by default 一个快捷计算，代表的都是外圆锥半顶角
     float    cosSubtendedAngle  = 0.9999893f;       ///< For distant light; cosine of the half-angle subtended by the light. Default corresponds to the sun as viewed from earth
     float    penumbraAngle      = 0.f;              ///< For point (spot) light: Opening half-angle of penumbra region in radians, usually does not exceed openingAngle. 0.f by default, meaning a spot light with hard cut-off
     float2   _pad0;

@@ -555,6 +555,14 @@ macro(copy_file IN_FILE OUT_DIR)
     endif()
 endmacro()
 
+# System Python may depend on DLLs outside the executable's directory.
+# Conda's Python 3.9 links zlib.dll from Library/bin even before Python starts.
+if(FALCOR_WINDOWS AND FALCOR_USE_SYSTEM_PYTHON)
+    get_filename_component(FALCOR_SYSTEM_PYTHON_DIR "${Python_EXECUTABLE}" DIRECTORY)
+    copy_file("${FALCOR_SYSTEM_PYTHON_DIR}/python${Python_VERSION_MAJOR}${Python_VERSION_MINOR}.dll" .)
+    copy_file("${FALCOR_SYSTEM_PYTHON_DIR}/Library/bin/zlib.dll" .)
+endif()
+
 # Fetch agility-sdk
 if(FALCOR_HAS_D3D12 AND (CMAKE_SYSTEM_NAME STREQUAL "Windows"))
     set(AGILITY_SDK_VERSION "1.717.0-preview")

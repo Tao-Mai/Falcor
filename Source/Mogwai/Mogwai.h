@@ -223,6 +223,17 @@ namespace Mogwai
         void registerScriptBindings(pybind11::module& m);
 
         void handleGamepadInput(float deltaTimeSeconds);
+
+        // Windowed workspace: square render target and a separate, fixed graph sidebar.
+        void updateWorkspaceLayout();
+        void setGraphSidebarVisible(bool visible) { mGraphSidebarVisible = visible; }
+        uint4 getGraphSidebarRect() const { return mGraphSidebarRect; }
+        uint4 getRenderViewport() const { return mRenderViewport; }
+        ref<Fbo> mpGraphTargetFbo;
+        uint4 mRenderViewport = uint4(0);
+        uint4 mGraphSidebarRect = uint4(0);
+        bool mGraphSidebarVisible = true;
+        uint32_t mViewportMouseButtons = 0;
     };
 
 #define MOGWAI_EXTENSION(Name)                         \

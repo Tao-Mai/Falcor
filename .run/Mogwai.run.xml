@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Mogwai" type="CMakeRunConfiguration" factoryName="Application" folderName="/" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PROGRAM_PARAMS="--device-type vulkan --use-cache --width 1400 --height 980 --shader-compile-db &quot;$PROJECT_DIR$/build/clion-release/shader_compile_commands.json&quot; --script &quot;$PROJECT_DIR$/scripts/MyPathTracer.py&quot; --scene &quot;$PROJECT_DIR$/resource/CornellBox/CornellBox.pyscene&quot;" WORKING_DIR="file://$PROJECT_DIR$/build/clion-release/bin/Release" PASS_PARENT_ENVS_2="true" PROJECT_NAME="Falcor" TARGET_NAME="Mogwai" CONFIG_NAME="clion-release - clion-release-build" RUN_TARGET_PROJECT_NAME="Falcor" RUN_TARGET_NAME="Mogwai">
+    <envs>
+      <env name="FALCOR_DEVMODE" value="1" />
+    </envs>
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      <option name="CMake.Explicit.Target" explicitTargetName="falcor-copy-files" />
+    </method>
+  </configuration>
+</component>
+

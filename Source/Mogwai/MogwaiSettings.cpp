@@ -30,6 +30,7 @@
 #include "Core/Program/ProgramManager.h"
 #include "Utils/Scripting/Console.h"
 #include "Utils/Settings/Settings.h"
+#include <imgui.h>
 #include <iomanip>
 #include <sstream>
 
@@ -42,7 +43,7 @@ namespace Mogwai
             constexpr char help[] =
                 "F1 - Show the help message\n"
                 "F9 - Show/hide the time\n"
-                "F6 - Show/hide the graph UI\n"
+                "F6 - Show/hide the graph sidebar\n"
                 "F7 - Enable/disable the overlay UI\n"
                 "F10 - Show/hide the FPS\n"
                 "F11 - Enable/disable main menu auto-hiding\n"
@@ -190,10 +191,38 @@ namespace Mogwai
 
     void MogwaiSettings::renderGraphs(Gui* pGui)
     {
-        if (!mShowGraphUI || mpRenderer->mGraphs.empty()) return;
-
-        Gui::Window w(pGui, "Graphs", mShowGraphUI, { 300, 600 }, { 10, 80 }, Gui::WindowFlags::Default);
         if (!mShowGraphUI) return;
+
+        const uint4 rect = mpRenderer->getGraphSidebarRect();
+        const float scale = getDisplayScaleFactor();
+        const uint2 pos(uint32_t(rect.x / scale), uint32_t(rect.y / scale));
+        const uint2 size(uint32_t((rect.z - rect.x) / scale), uint32_t((rect.w - rect.y) / scale));
+        if (!size.x || !size.y) return;
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.f * scale, 16.f * scale));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.115f, 0.14f, 1.f));
+        Gui::Window w(pGui, "Graph Sidebar", size, pos, Gui::WindowFlags::Fixed);
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar(3);
+
+        auto* drawList = ImGui::GetWindowDrawList();
+        drawList->AddLine(ImVec2(float(rect.x), float(rect.y)), ImVec2(float(rect.x), float(rect.w)), IM_COL32(68, 94, 120, 255), scale);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.42f, 0.77f, 0.92f, 1.f));
+        w.text("RENDER GRAPH");
+        ImGui::PopStyleColor();
+        const auto viewport = mpRenderer->getRenderViewport();
+        ImGui::TextDisabled("Viewport  %u x %u  /  1:1", viewport.z - viewport.x, viewport.w - viewport.y);
+        if (mShowFps) ImGui::TextDisabled("%s", mpRenderer->getFrameRate().getMsg(mpRenderer->isVsyncEnabled()).c_str());
+        w.separator();
+
+        if (mpRenderer->mGraphs.empty())
+        {
+            w.text("No render graph loaded.");
+            if (w.button("Load Script")) mpRenderer->loadScriptDialog();
+            return;
+        }
 
         if (mpRenderer->mEditorProcess == 0)
         {
@@ -306,7 +335,7 @@ namespace Mogwai
 
         {
             auto view = m.dropdown("View");
-            view.item("Graph UI", mShowGraphUI, "F6");
+            view.item("Graph Sidebar", mShowGraphUI, "F6");
             view.item("Overlay UI", mShowOverlayUI, "F7");
             view.item("Auto Hide", mAutoHideMenu, "F11");
             view.item("FPS", mShowFps, "F10");
@@ -335,9 +364,13 @@ namespace Mogwai
     void MogwaiSettings::renderUI(Gui* pGui__)
     {
         Gui* pGui = (Gui*)pGui__;
+        const float scale = getDisplayScaleFactor();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.f * scale, 5.f * scale));
         renderMainMenu(pGui);
+        ImGui::PopStyleVar();
+        mpRenderer->setGraphSidebarVisible(mShowGraphUI);
         renderGraphs(pGui);
-        if (mShowFps) showFps(pGui, mpRenderer);
+        if (mShowFps && !mShowGraphUI) showFps(pGui, mpRenderer);
         if (mShowTime) renderTimeSettings(pGui);
         if (mShowWinSize) renderWindowSettings(pGui);
         mpRenderer->getConsole().render(pGui__, mShowConsole);
@@ -374,6 +407,7 @@ namespace Mogwai
                     break;
                 case Input::Key::F6:
                     mShowGraphUI = !mShowGraphUI;
+                    mpRenderer->setGraphSidebarVisible(mShowGraphUI);
                     break;
                 case Input::Key::F9:
                     mShowTime = !mShowTime;
@@ -420,6 +454,7 @@ namespace Mogwai
         mShowConsole  = options.get("MogwaiSettings:mShowConsole", mShowConsole);
         mShowTime     = options.get("MogwaiSettings:mShowTime", mShowTime);
         mShowWinSize  = options.get("MogwaiSettings:mShowWinSize", mShowWinSize);
+        mpRenderer->setGraphSidebarVisible(mShowGraphUI);
     }
 
     MogwaiSettings::UniquePtr MogwaiSettings::create(Renderer* pRenderer)
