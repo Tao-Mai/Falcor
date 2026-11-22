@@ -373,7 +373,7 @@ struct Viewer
                         break;
                     const uint32_t size = ntohl(header);
                     if (size == 0 || size > kMaxFrameBytes)
-                        throw std::runtime_error("Invalid H.264 packet size from Mogwai");
+                        throw std::runtime_error("Invalid H.264 packet size from the renderer");
                     frame.resize(size);
                     headerOffset = 0;
                 }
@@ -402,7 +402,7 @@ struct Viewer
                 glfwWaitEventsTimeout(0.002);
         }
         if (!glfwWindowShouldClose(window))
-            throw std::runtime_error("The connection to Mogwai closed");
+            throw std::runtime_error("The connection to the Falcor renderer closed");
     }
 
 private:

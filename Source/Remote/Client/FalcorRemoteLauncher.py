@@ -69,7 +69,7 @@ def launch(args):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         local_port = reservation.getsockname()[1]
-    script = PurePosixPath(args.repo) / "Source/Remote/serve_viewer.py"
+    script = PurePosixPath(args.repo) / "Source/Remote/Server/serve_viewer.py"
     command = shlex.join(["python3", "-I", str(script), digest(cached)])
     ssh = [
         "ssh", "-T", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10",
@@ -108,7 +108,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host", help="SSH alias or user@host")
     parser.add_argument("--repo", default="project/rendering/Falcor", help="Falcor checkout on the SSH host")
-    parser.add_argument("--port", type=int, default=9000, help="Mogwai remote port on the SSH host")
+    parser.add_argument("--port", type=int, default=9000, help="Falcor renderer port on the SSH host")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")

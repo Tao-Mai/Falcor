@@ -8,12 +8,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(../../external/glfw glfw)
 endif()
 
-add_library(falcor_remote STATIC RemoteTransport.cpp RemoteTransport.h)
+add_library(falcor_remote STATIC Server/RemoteTransport.cpp Server/RemoteTransport.h)
 target_compile_features(falcor_remote PUBLIC cxx_std_17)
-target_include_directories(falcor_remote PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(falcor_remote PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Server)
 
 set(GLFW_DEPS ${CMAKE_CURRENT_SOURCE_DIR}/../../external/glfw/deps)
-add_executable(FalcorRemoteViewer RemoteViewer.cpp ${GLFW_DEPS}/glad_gl.c)
+add_executable(FalcorRemoteViewer Client/RemoteViewer.cpp ${GLFW_DEPS}/glad_gl.c)
 target_include_directories(FalcorRemoteViewer PRIVATE ${GLFW_DEPS})
 target_link_libraries(FalcorRemoteViewer PRIVATE falcor_remote glfw)
 
@@ -44,4 +44,8 @@ endif()
 
 if(FALCOR_RUNTIME_OUTPUT_DIRECTORY)
     set_target_properties(FalcorRemoteViewer PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${FALCOR_RUNTIME_OUTPUT_DIRECTORY})
+endif()
+
+if(TARGET Falcor)
+    add_subdirectory(Server)
 endif()

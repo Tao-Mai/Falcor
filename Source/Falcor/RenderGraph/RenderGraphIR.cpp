@@ -27,7 +27,6 @@
  **************************************************************************/
 #include "RenderGraphIR.h"
 #include "RenderGraph.h"
-#include "Utils/StringUtils.h"
 #include "Utils/Scripting/Scripting.h"
 #include "Utils/Scripting/ScriptWriter.h"
 
@@ -95,7 +94,13 @@ void RenderGraphIR::unmarkOutput(const std::string& name)
 std::string RenderGraphIR::getFuncName(const std::string& graphName)
 {
     std::string name = "render_graph_" + graphName;
-    name = replaceCharacters(name, " /\\", '_');
+    for (char& character : name)
+    {
+        const bool identifier = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+                                (character >= '0' && character <= '9') || character == '_';
+        if (!identifier)
+            character = '_';
+    }
     return name;
 }
 

@@ -11,6 +11,7 @@
 namespace Falcor::Remote
 {
 inline constexpr uint32_t kMaxFrameBytes = 16 * 1024 * 1024;
+inline constexpr uint32_t kMaxControlBytes = 1024 * 1024;
 
 enum class InputType : uint32_t
 {
@@ -19,10 +20,17 @@ enum class InputType : uint32_t
     Button,
     Scroll,
     ReleaseAll,
+    Look,
+    Text,
+    Leave,
+    EnableLookNavigation,
+    OpenPreview = 11,
+    OpenControls,
 };
 
 // The wire representation uses six big-endian words. Key, action and modifier
-// codes use GLFW's values. Coordinates are normalized, except for scroll deltas.
+// codes use GLFW's values. Look uses press and release for capture and repeat
+// for virtual cursor movement. Scroll carries wheel deltas.
 struct InputEvent
 {
     InputType type;
@@ -50,7 +58,8 @@ public:
     static Socket connect(const char* host, uint16_t port);
 #ifndef _WIN32
     static Socket listen(const char* address, uint16_t port);
-    Socket accept() const;
+    Socket accept(int timeoutMs) const;
+    bool waitReadable(int timeoutMs) const;
 #endif
 
     explicit operator bool() const { return mFd != kInvalid; }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 build="$repo/build/remote-gcc"
 cd -- "$repo"
 
@@ -15,5 +15,5 @@ if [[ ! -f "$build/CMakeCache.txt" && -z "${CUDACXX:-}" ]] && ! command -v nvcc 
 fi
 
 cmake -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DFALCOR_ENABLE_REMOTE=ON
-cmake --build "$build" --target Mogwai --parallel "${FALCOR_BUILD_JOBS:-8}"
-exec "$build/bin/Mogwai" "$@"
+cmake --build "$build" --target FalcorRemoteServer --parallel "${FALCOR_BUILD_JOBS:-8}"
+exec "$build/bin/FalcorRemoteServer" "$@"

@@ -126,8 +126,20 @@ Socket Socket::listen(const char* address, uint16_t port)
     return listener;
 }
 
-Socket Socket::accept() const
+bool Socket::waitReadable(int timeoutMs) const
 {
+    pollfd descriptor{mFd, POLLIN, 0};
+    const int ready = poll(&descriptor, 1, timeoutMs);
+    if (ready < 0 && errno != EINTR)
+        socketError("Waiting for remote socket");
+    return ready > 0;
+}
+
+Socket Socket::accept(int timeoutMs) const
+{
+    if (!waitReadable(timeoutMs))
+        return {};
+
     Socket peer(::accept4(mFd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC));
     if (peer)
         peer.configureConnection();
@@ -191,14 +203,14 @@ Socket Socket::connect(const char* host, uint16_t port)
         }
         SocketLength size = sizeof(failure);
         if (getsockopt(peer.mFd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&failure), &size) != 0)
-            socketError("Checking the connection to Mogwai");
+            socketError("Checking the connection to the Falcor renderer");
         if (failure == 0)
         {
             peer.configureConnection();
             return peer;
         }
     }
-    throw std::system_error(failure, std::system_category(), "Connecting to Mogwai");
+    throw std::system_error(failure, std::system_category(), "Connecting to the Falcor renderer");
 }
 
 void Socket::configureConnection()

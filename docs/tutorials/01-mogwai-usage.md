@@ -58,21 +58,23 @@ Using `--silent` together with `--script` allows to run Mogwai for rendering in 
 
 If you start it without specifying any options, Mogwai starts with a blank screen.
 
-## Interactive remote preview
+## Remote Falcor editor
 
-Open the checkout on the Linux render server in CLion and run **Mogwai Remote**. The configuration builds Mogwai with CUDA and starts the Cornell box at 1920×1080 on port 9000. Set `--script` and `--scene` in the configuration to use a different render graph and scene.
+Open the checkout on the Linux render server in CLion and run **Falcor Remote**. It builds `FalcorRemoteServer`, loads `MinimalPathTracer` and the Cornell box, and waits for a viewer on port 9000. Rendering starts on connection and stops on disconnect. Set `--script` and `--scene` for other content. `--fps` sets the stream cap and defaults to 60.
 
-On Windows, copy `tools/remote/FalcorRemoteLauncher.py` once. Run it with 64-bit Python and the same OpenSSH host you use to log into the render server. The viewer uses the local NVIDIA GPU to decode H.264.
+On Windows, copy `Source/Remote/Client/FalcorRemoteLauncher.py` once. Run it with 64-bit Python 3.10 through 3.14 and the same OpenSSH host you use to log into the render server. The viewer uses the local NVIDIA GPU to decode H.264.
 
 ```powershell
 py .\FalcorRemoteLauncher.py user@render-server --repo /path/to/Falcor
 ```
 
-The default checkout path is `project/rendering/Falcor` relative to the SSH user's home directory. Use `--port` if you change Mogwai's preview port.
+The default checkout path is `project/rendering/Falcor` relative to the SSH user's home directory. Use `--port` if you change the renderer's port.
 
-The launcher checks the viewer version on each connection and downloads the changed script and requirements over SSH. It installs Python packages into a local cache on first use or when the requirements change. After editing `Source/Remote/viewer.py` on the server, open the launcher again to use the new version. The same SSH connection carries the video and input.
+The launcher checks the editor version on each connection and downloads changed code and requirements over SSH. It installs Python packages into a local cache on first use or when the requirements change. Reopen the launcher after editing the Python files in `Source/Remote/Client`. Video and editor commands use separate TCP connections through the same SSH forward.
 
-The viewer sends keyboard presses, mouse drags, and wheel events to the active render graph and scene. The first-person camera uses W, A, S, D, Q, and E for movement and left-button drag for rotation.
+The editor opens centered with a 1592-pixel-wide window when the screen has room. The menu bar sits above the square viewport and the fixed right panel. The editor draws its menus, graph editor, controls and dialogs locally. The server encodes one 1080×1080 scene feed from GPU memory. File dialogs browse paths on the render server. The Graphs panel exposes render pass properties, camera and scene settings, graph outputs and capture. The View menu opens time controls, a Python console and the profiler.
+
+Hold the right mouse button inside the viewport and move the mouse to look around. While holding it, use W, A, S, and D to move and Q or E to descend or ascend. The FPS display reports render and decode rates independently. Framework Stats shows GPU wait and NVENC timings.
 
 ## Loading Scripts and Assets
 

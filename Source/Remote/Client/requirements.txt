@@ -1,0 +1,5 @@
+PyNvVideoCodec==2.2.4
+glfw==2.11.0
+PyOpenGL==3.1.10
+imgui-bundle==1.5.2; python_version == "3.10"
+imgui-bundle==1.93.0; python_version >= "3.11"

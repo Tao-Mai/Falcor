@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "RenderGraphImportExport.h"
 #include "RenderGraphIR.h"
+#include <nlohmann/json.hpp>
 #include "Core/AssetResolver.h"
 #include "Utils/Scripting/Scripting.h"
 #include <fstream>
@@ -158,6 +159,46 @@ std::string RenderGraphExporter::getIR(const ref<RenderGraph>& pGraph)
     }
 
     return ir.getIR();
+}
+
+nlohmann::json RenderGraphExporter::describe(const RenderGraph& graph)
+{
+    using nlohmann::json;
+    RenderPass::CompileData compileData;
+    compileData.defaultTexDims = graph.mCompilerDeps.defaultResourceProps.dims;
+    compileData.defaultTexFormat = graph.mCompilerDeps.defaultResourceProps.format;
+    json passes = json::array();
+    for (const auto& [id, node] : graph.mNodeData)
+    {
+        json inputs = json::array(), outputs = json::array();
+        const auto reflection = node.pPass->reflect(compileData);
+        for (size_t i = 0; i < reflection.getFieldCount(); ++i)
+        {
+            const auto& field = *reflection.getField(i);
+            if (is_set(field.getVisibility(), RenderPassReflection::Field::Visibility::Input))
+                inputs.push_back(field.getName());
+            if (is_set(field.getVisibility(), RenderPassReflection::Field::Visibility::Output))
+                outputs.push_back(field.getName());
+        }
+        passes.push_back({{"name", node.name}, {"type", node.pPass->getType()}, {"description", node.pPass->getDesc()},
+                          {"properties", node.pPass->getProperties().toJson()}, {"inputs", std::move(inputs)}, {"outputs", std::move(outputs)}});
+    }
+    std::sort(passes.begin(), passes.end(), [](const json& a, const json& b) { return a.at("name") < b.at("name"); });
+
+    json edges = json::array();
+    for (const auto& [id, fields] : graph.mEdgeData)
+    {
+        const auto* edge = graph.mpGraph->getEdge(id);
+        const auto& src = graph.mNodeData.at(edge->getSourceNode()).name;
+        const auto& dst = graph.mNodeData.at(edge->getDestNode()).name;
+        edges.push_back({src + (fields.srcField.empty() ? "" : "." + fields.srcField),
+                         dst + (fields.dstField.empty() ? "" : "." + fields.dstField)});
+    }
+
+    json outputs = json::array();
+    for (size_t i = 0; i < graph.getOutputCount(); ++i)
+        outputs.push_back({{"name", graph.getOutputName(i)}, {"masks", graph.getOutputMasks(i)}});
+    return {{"name", graph.getName()}, {"passes", std::move(passes)}, {"edges", std::move(edges)}, {"outputs", std::move(outputs)}};
 }
 
 bool RenderGraphExporter::save(const ref<RenderGraph>& pGraph, std::filesystem::path path)

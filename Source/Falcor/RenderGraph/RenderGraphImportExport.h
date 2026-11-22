@@ -57,6 +57,7 @@ class FALCOR_API RenderGraphExporter
 {
 public:
     static std::string getIR(const ref<RenderGraph>& pGraph);
+    static nlohmann::json describe(const RenderGraph& graph);
     static std::string getFuncName(const std::string& graphName);
     static bool save(const ref<RenderGraph>& pGraph, std::filesystem::path path = {});
 };

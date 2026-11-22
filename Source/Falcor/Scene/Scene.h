@@ -565,6 +565,9 @@ namespace Falcor
         */
         void selectViewpoint(uint32_t index);
 
+        size_t getViewpointCount() const { return mViewpoints.size(); }
+        uint32_t getCurrentViewpoint() const { return mCurrentViewpoint; }
+
         /** Returns true if there are saved viewpoints (used for dumping to config).
         */
         bool hasSavedViewpoints() { return mViewpoints.size() > 1; }

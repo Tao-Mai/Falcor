@@ -30,7 +30,7 @@ set(FALCOR_USE_SYSTEM_PYTHON OFF CACHE BOOL "Use system Python distribution")
 set(FALCOR_ENABLE_USD ON CACHE BOOL "Enable USD")
 
 # Build the Linux remote preview server and viewer.
-option(FALCOR_ENABLE_REMOTE "Enable Mogwai remote preview" OFF)
+option(FALCOR_ENABLE_REMOTE "Build the standalone Falcor remote renderer" OFF)
 
 
 # Enable/disable Address Sanitizer.
@@ -437,7 +437,7 @@ add_subdirectory(Source/Falcor)
 add_subdirectory(Source/Modules)
 if(FALCOR_ENABLE_REMOTE)
     if(NOT FALCOR_LINUX OR NOT FALCOR_HAS_CUDA)
-        message(FATAL_ERROR "Mogwai remote preview requires Linux and CUDA support.")
+        message(FATAL_ERROR "Falcor remote rendering requires Linux and CUDA support.")
     endif()
     add_subdirectory(Source/Remote)
 endif()
@@ -472,6 +472,9 @@ file(GENERATE OUTPUT ${FALCOR_OUTPUT_DIRECTORY}/settings.json CONTENT "{ \"stand
 # Make Mogwai and FalcorPython depend on all plugins.
 if(plugin_targets)
     add_dependencies(Mogwai ${plugin_targets})
+    if(TARGET FalcorRemoteServer)
+        add_dependencies(FalcorRemoteServer ${plugin_targets} FalcorPython)
+    endif()
     add_dependencies(FalcorPython ${plugin_targets})
     add_dependencies(Mogwai FalcorPython)
 endif()

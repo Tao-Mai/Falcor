@@ -375,7 +375,8 @@ namespace Falcor
         case MouseEvent::Type::Move:
             if(mIsLeftButtonDown || mIsRightButtonDown)
             {
-                mMouseDelta = event.pos - mLastMousePos;
+                const float2 delta = event.pos - mLastMousePos;
+                mMouseDelta = mShouldRotate ? mMouseDelta + delta : delta;
                 mLastMousePos = event.pos;
                 mShouldRotate = true;
                 handled = true;
