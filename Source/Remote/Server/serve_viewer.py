@@ -8,13 +8,18 @@ import sys
 
 def main(cached_version):
     source_dir = Path(__file__).resolve().parent.parent / "Client"
-    controls = (source_dir / "controls.py").read_text(encoding="utf-8")
     viewer = (source_dir / "viewer.py").read_text(encoding="utf-8")
-    # The installed launcher expects a single entry script in the bundle.
+    # Keep the single entry script expected by installed launchers.
+    modules = ("controls.py", "preview_decoder.py", "preview_display.py")
+    setup = "".join(
+        f"_BundlePath(__file__).with_name({name!r}).write_text("
+        f"{(source_dir / name).read_text(encoding='utf-8')!r}, encoding='utf-8')\n"
+        for name in modules
+    )
     source = (
         '"""Launch the Falcor remote editor."""\n'
         "from pathlib import Path as _BundlePath\n"
-        f"_BundlePath(__file__).with_name('controls.py').write_text({controls!r}, encoding='utf-8')\n"
+        + setup
         + viewer
     )
     payload = json.dumps(

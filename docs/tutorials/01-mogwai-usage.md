@@ -74,7 +74,9 @@ The launcher checks the editor version on each connection and downloads changed 
 
 The editor opens centered with a 1592-pixel-wide window when the screen has room. The menu bar sits above the square viewport and the fixed right panel. The editor draws its menus, graph editor, controls and dialogs locally. The server encodes one 1080×1080 scene feed from GPU memory. File dialogs browse paths on the render server. The Graphs panel exposes render pass properties, camera and scene settings, graph outputs and capture. The View menu opens time controls, a Python console and the profiler.
 
-Hold the right mouse button inside the viewport and move the mouse to look around. While holding it, use W, A, S, and D to move and Q or E to descend or ascend. The FPS display reports render and decode rates independently. Framework Stats shows GPU wait and NVENC timings.
+Open **Stream Encoding** above **Scene Settings** to switch codecs while connected. H.264 and H.265 use NVENC and NVDEC with an adjustable target bitrate. HEVC Lossless RGB preserves the 8-bit RGB preview pixel for pixel. JPEG encodes each frame with nvJPEG and lets you set quality and 4:4:4 or 4:2:0 chroma sampling. The panel shows the measured bitrate. **Frame Limit** controls the render and stream rate up to the server's `--fps` value. Press Enter to apply numeric fields.
+
+Hold the right mouse button inside the viewport and move the mouse to look around. While holding it, use W, A, S, and D to move and Q or E to descend or ascend. The FPS display reports render and decode rates independently. Framework Stats shows GPU wait and encode timings.
 
 ## Loading Scripts and Assets
 

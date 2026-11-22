@@ -106,7 +106,7 @@ def launch(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("host", help="SSH alias or user@host")
+    parser.add_argument("host", nargs="?", default="4090", help="SSH config alias")
     parser.add_argument("--repo", default="project/rendering/Falcor", help="Falcor checkout on the SSH host")
     parser.add_argument("--port", type=int, default=9000, help="Falcor renderer port on the SSH host")
     args = parser.parse_args()

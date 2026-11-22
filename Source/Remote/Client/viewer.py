@@ -2,7 +2,6 @@
 
 import argparse
 from collections import deque
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -17,13 +16,13 @@ if os.getenv("XDG_SESSION_TYPE") == "wayland":
 
 import glfw
 from OpenGL import GL
-from OpenGL.GL import shaders
-import PyNvVideoCodec as nvc
 import imgui_bundle
 from imgui_bundle import imgui
 from imgui_bundle.python_backends.glfw_backend import GlfwRenderer
 
 from controls import Editor
+from preview_decoder import PREVIEW_PROTOCOL, PreviewDecoder
+from preview_display import PreviewDisplay
 
 
 FRAME_SIZE = struct.Struct("!I")
@@ -41,24 +40,15 @@ WINDOW_WIDTH = VIEWPORT_SIDE + PANEL_WIDTH
 WINDOW_HEIGHT = VIEWPORT_SIDE + int(FONT_SIZE + 2 * FRAME_PADDING[1])
 
 
-FRAGMENT_SHADER = """#version 120
-uniform sampler2D luma;
-uniform sampler2D chroma;
-void main() {
-    vec2 pos = gl_TexCoord[0].st;
-    float y = (texture2D(luma, pos).r * 255.0 - 16.0) / 219.0;
-    vec2 uv = (texture2D(chroma, pos).ra * 255.0 - 128.0) / 224.0;
-    gl_FragColor = vec4(y + 1.5748 * uv.y,
-                        y - 0.1873 * uv.x - 0.4681 * uv.y,
-                        y + 1.8556 * uv.x, 1.0);
-}
-"""
-
-
 class Connection:
     def __init__(self, sock):
         self.sock = sock
-        self.buffer = bytearray()
+        self.frame_size = bytearray(FRAME_SIZE.size)
+        self.frame = None
+        self.read_offset = 0
+        self.received_bytes = 0
+        self.receive_sample_at = time.monotonic()
+        self.received_bytes_per_second = 0.0
         self.inputs = deque()
         self.input_offset = 0
         self.input_overflow = False
@@ -92,30 +82,40 @@ class Connection:
                 self.inputs.popleft()
                 self.input_offset = 0
 
+    def read(self, target):
+        while self.read_offset < len(target):
+            try:
+                count = self.sock.recv_into(memoryview(target)[self.read_offset:])
+            except BlockingIOError:
+                return False
+            if not count:
+                raise ConnectionError("The renderer closed the video connection")
+            self.read_offset += count
+            self.received_bytes += count
+        self.read_offset = 0
+        return True
+
+    def receive_rate(self, now):
+        elapsed = now - self.receive_sample_at
+        if elapsed >= 1.0:
+            self.received_bytes_per_second = self.received_bytes / elapsed
+            self.received_bytes = 0
+            self.receive_sample_at = now
+        return self.received_bytes_per_second
+
     def receive_frames(self):
-        read_socket = False
         for _ in range(4):
-            while True:
-                if len(self.buffer) >= FRAME_SIZE.size:
-                    size, = FRAME_SIZE.unpack_from(self.buffer)
-                    if not 0 < size <= MAX_FRAME_BYTES:
-                        raise ValueError("Invalid H.264 packet size from the renderer")
-                    end = FRAME_SIZE.size + size
-                    if len(self.buffer) >= end:
-                        payload = self.buffer[FRAME_SIZE.size:end]
-                        del self.buffer[:end]
-                        break
-                if read_socket:
+            if self.frame is None:
+                if not self.read(self.frame_size):
                     return
-                try:
-                    data = self.sock.recv(256 * 1024)
-                except BlockingIOError:
-                    return
-                if not data:
-                    raise ConnectionError("The renderer closed the video connection")
-                self.buffer.extend(data)
-                read_socket = True
-            yield payload
+                size, = FRAME_SIZE.unpack(self.frame_size)
+                if not 0 < size <= MAX_FRAME_BYTES:
+                    raise ValueError("Invalid preview packet size from the renderer")
+                self.frame = bytearray(size)
+            if not self.read(self.frame):
+                return
+            frame, self.frame = self.frame, None
+            yield frame
 
 
 class ControlConnection:
@@ -224,84 +224,14 @@ def configure_ui():
     atlas.add_font_from_file_ttf(str(bundled_font), FONT_SIZE)
 
 
-class Video:
-    def __init__(self):
-        self.width = self.height = 0
-        self.reset_decoder()
-        self.packet = nvc.PacketData()
-        self.packet.decode_flag = nvc.VideoPacketFlag.ENDOFPICTURE
-        self.textures = GL.glGenTextures(2)
-        for texture in self.textures:
-            GL.glBindTexture(GL.GL_TEXTURE_2D, int(texture))
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
-
-    def reset_decoder(self):
-        self.decoder = nvc.CreateDecoder(
-            codec=nvc.cudaVideoCodec.H264, usedevicememory=False,
-            latency=nvc.DisplayDecodeLatencyType.ZERO,
-        )
-
-    def decode(self, data):
-        self.packet.bsl = len(data)
-        self.packet.bsl_data = ctypes.addressof(ctypes.c_char.from_buffer(data))
-        frames = self.decoder.Decode(self.packet)
-        if not frames:
-            return False
-        self.upload(frames[-1])
-        return True
-
-    def upload(self, frame):
-        rows, width = frame.shape
-        height = rows * 2 // 3
-        resize = (self.width, self.height) != (width, height)
-        self.width, self.height = width, height
-        for index, (w, h, format_) in enumerate(
-            ((width, height, GL.GL_LUMINANCE), (width // 2, height // 2, GL.GL_LUMINANCE_ALPHA))
-        ):
-            GL.glActiveTexture(GL.GL_TEXTURE0 + index)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, int(self.textures[index]))
-            GL.glPixelStorei(GL.GL_UNPACK_ROW_LENGTH, frame.strides[0] // (index + 1))
-            pixels = ctypes.c_void_p(frame.GetPtrToPlane(index))
-            if resize:
-                GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, format_, w, h, 0, format_, GL.GL_UNSIGNED_BYTE, pixels)
-            else:
-                GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, w, h, format_, GL.GL_UNSIGNED_BYTE, pixels)
-        GL.glPixelStorei(GL.GL_UNPACK_ROW_LENGTH, 0)
-
-    def draw(self, rect):
-        if not self.width or not rect[2] or not rect[3]:
-            return
-        for index, texture in enumerate(self.textures):
-            GL.glActiveTexture(GL.GL_TEXTURE0 + index)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, int(texture))
-        GL.glViewport(*rect)
-        GL.glBegin(GL.GL_QUADS)
-        GL.glTexCoord2f(0, 0)
-        GL.glVertex2f(-1, 1)
-        GL.glTexCoord2f(1, 0)
-        GL.glVertex2f(1, 1)
-        GL.glTexCoord2f(1, 1)
-        GL.glVertex2f(1, -1)
-        GL.glTexCoord2f(0, 1)
-        GL.glVertex2f(-1, -1)
-        GL.glEnd()
-
-
 def run(window, video_connection, control_connection):
     imgui.create_context()
     configure_ui()
     backend = GlfwRenderer(window, attach_callbacks=False)
     editor = Editor(control_connection)
-    video = Video()
-    fragment = shaders.compileShader(FRAGMENT_SHADER, GL.GL_FRAGMENT_SHADER)
-    program = shaders.compileProgram(fragment, validate=False)
-    GL.glUseProgram(program)
-    GL.glUniform1i(GL.glGetUniformLocation(program, "luma"), 0)
-    GL.glUniform1i(GL.glGetUniformLocation(program, "chroma"), 1)
-    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
+    decoder = PreviewDecoder()
+    display = PreviewDisplay()
+    displayed_stream = None
     look_origin = None
     forwarded_keys = set()
     forwarded_buttons = set()
@@ -310,7 +240,7 @@ def run(window, video_connection, control_connection):
 
     def position(x, y, dragging=False):
         left, top, side, _ = viewport
-        if not side or not video.width:
+        if not side or not display.width:
             return None
         if dragging or (left <= x < left + side and top <= y < top + side):
             return (min(1.0, max(0.0, (x - left) / side)), min(1.0, max(0.0, (y - top) / side)))
@@ -436,14 +366,24 @@ def run(window, video_connection, control_connection):
             video_connection.send_inputs()
             control_connection.poll()
             now = time.monotonic()
+            editor.video_bytes_per_second = video_connection.receive_rate(now)
             editor.poll_stats(now)
             for payload in video_connection.receive_frames():
-                first_frame = video.width == 0
-                if video.decode(payload):
-                    if first_frame:
-                        print(f"Receiving {video.width}x{video.height} H.264 video (NVDEC).", flush=True)
-                    editor.received_frame(now)
+                try:
+                    frame = decoder.decode(payload)
+                except Exception as error:
+                    editor.message = f"Preview decoding failed: {error}"
                     redraw = True
+                    continue
+                if frame is None:
+                    continue
+                display.upload(frame)
+                if displayed_stream != decoder.stream:
+                    print(f"Receiving {frame.width}x{frame.height} {decoder.description}.", flush=True)
+                    displayed_stream = decoder.stream
+                del frame
+                editor.received_frame(time.monotonic())
+                redraw = True
 
             if redraw or editor.dirty or now - rendered_at >= 1.0 / 60.0:
                 width, height = glfw.get_window_size(window)
@@ -462,8 +402,7 @@ def run(window, video_connection, control_connection):
                 x, y, side, _ = viewport
                 x0, x1 = (round(value * fb_width / width) for value in (x, x + side))
                 y0, y1 = (round(value * fb_height / height) for value in (y, y + side))
-                GL.glUseProgram(program)
-                video.draw((x0, fb_height - y1, x1 - x0, y1 - y0))
+                display.draw((x0, fb_height - y1, x1 - x0, y1 - y0))
                 backend.render(imgui.get_draw_data())
                 glfw.swap_buffers(window)
                 rendered_at = now
@@ -471,6 +410,7 @@ def run(window, video_connection, control_connection):
             else:
                 glfw.wait_events_timeout(0.001)
     finally:
+        display.close()
         editor.close()
         backend.shutdown()
         imgui.destroy_context()
@@ -503,7 +443,8 @@ def connect(host, port, role, session):
     sock = socket.create_connection((host, port), timeout=5)
     try:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.sendall(INPUT_EVENT.pack(role, session >> 32, session & 0xffffffff, 0, 0.0, 0.0))
+        protocol = PREVIEW_PROTOCOL if role == OPEN_PREVIEW else 0
+        sock.sendall(INPUT_EVENT.pack(role, session >> 32, session & 0xffffffff, protocol, 0.0, 0.0))
         return sock
     except BaseException:
         sock.close()

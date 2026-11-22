@@ -12,6 +12,8 @@ namespace Falcor::Remote
 {
 inline constexpr uint32_t kMaxFrameBytes = 16 * 1024 * 1024;
 inline constexpr uint32_t kMaxControlBytes = 1024 * 1024;
+inline constexpr uint32_t kPreviewProtocol = 1;     // OpenPreview.mods
+inline constexpr uint32_t kPreviewMagic = 0x46435631; // "FCV1"
 
 enum class InputType : uint32_t
 {

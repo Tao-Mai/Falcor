@@ -346,6 +346,7 @@ class Editor:
         self.console_code = ""
         self.next_poll = 0.0
         self.video_fps = 0.0
+        self.video_bytes_per_second = 0.0
         self.video_count = 0
         self.video_start = 0.0
         self.picker = None
@@ -548,6 +549,9 @@ class Editor:
                 imgui.text_disabled("Waiting for renderer state…")
             if imgui.button("New Graph"):
                 self.open_graph_editor({"name": "RenderGraph", "passes": [], "edges": [], "outputs": []})
+            encoding = self.stats.get("encoding")
+            if encoding and imgui.collapsing_header("Stream Encoding"):
+                self.draw_encoding(encoding)
             if self.state.get("scene") and imgui.collapsing_header("Scene Settings"):
                 self.draw_scene(self.state["scene"])
             if graph and imgui.collapsing_header("Render Passes", imgui.TreeNodeFlags_.default_open):
@@ -555,6 +559,39 @@ class Editor:
             if imgui.collapsing_header("Framework Stats"):
                 self.draw_metrics()
         imgui.end()
+
+    def draw_encoding(self, encoding):
+        codecs = {
+            "h264": "H.264 (Lossy)",
+            "hevc": "H.265 / HEVC (Lossy)",
+            "hevc_rgb": "H.265 / HEVC (Lossless RGB)",
+            "jpeg": "JPEG (Per Frame)",
+        }
+        codec = encoding["codec"]
+        choices = list(codecs)
+        changes = {}
+        changed, index = imgui.combo("Codec", choices.index(codec), list(codecs.values()))
+        if changed:
+            changes["codec"] = choices[index]
+
+        settings = [("fps", "Frame Limit")]
+        if codec in ("h264", "hevc"):
+            settings.append(("bitrate_mbps", "Bitrate (Mb/s)"))
+        if codec == "jpeg":
+            settings.append(("jpeg_quality", "JPEG Quality"))
+            sampling = ["444", "420"]
+            changed, index = imgui.combo("Chroma Sampling", sampling.index(encoding["jpeg_chroma"]), ["4:4:4", "4:2:0"])
+            if changed:
+                changes["jpeg_chroma"] = sampling[index]
+        for key, label in settings:
+            changed, value = edit_value(label, encoding[key])
+            maximum = encoding["max_fps"] if key == "fps" else 100
+            imgui.set_item_tooltip(f"1–{maximum}. Press Enter to apply.")
+            if changed:
+                changes[key] = value
+        if changes:
+            self.send("preview_encoding", lambda result: self.stats.update(encoding=result), changes=changes)
+        imgui.text_disabled(f"{encoding.get('measured_mbps', 0):.1f} Mb/s")
 
     def draw_graph(self, graph):
         changed, selected = choose("Active Graph", graph["name"], self.state.get("graphs", []))
@@ -646,10 +683,18 @@ class Editor:
             self.send("environment", path="")
 
     def draw_metrics(self):
-        for key, label in (("submit_ms", "CPU commands"), ("gpu_wait_ms", "GPU and copy"), ("encode_ms", "NVENC")):
+        for key, label in (("submit_ms", "CPU commands"), ("gpu_wait_ms", "GPU and copy"), ("encode_ms", "Encode")):
             imgui.text(f"{label}  {self.stats.get(key, 0):.2f} ms")
         imgui.text(f"Encoded stream  {self.stats.get('fps', 0):.1f} FPS")
         imgui.text(f"Stream limit  {self.stats.get('limit', 60)} FPS")
+        rate = self.video_bytes_per_second
+        if rate >= 1_000_000:
+            traffic = f"{rate / 1_000_000:.1f} MB/s"
+        elif rate >= 1_000:
+            traffic = f"{rate / 1_000:.1f} KB/s"
+        else:
+            traffic = f"{rate:.0f} B/s"
+        imgui.text(f"Video traffic  {traffic}")
         imgui.text(f"Rendered frames  {self.stats.get('frame', 0)}")
 
     def draw_time(self, viewport):

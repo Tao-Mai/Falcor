@@ -92,11 +92,14 @@ json RemoteRenderer::stats() const
         for (const auto* event : profiler->getEvents())
             events.push_back({{"name", event->getName()}, {"cpu_ms", event->getCpuTime()}, {"gpu_ms", event->getGpuTime()}});
     }
+    const auto& streamError = mStream.encodingError();
+    const auto& error = mRenderError.empty() ? (streamError.empty() ? mCaptureError : streamError) : mRenderError;
     return {
         {"fps", mStream.framesPerSecond()}, {"render_fps", mRenderFps}, {"limit", mStream.frameLimit()}, {"frame", mFrames},
+        {"encoding", mStream.encoding()},
         {"submit_ms", mSubmitMs}, {"gpu_wait_ms", mStream.gpuWaitMs()}, {"encode_ms", mStream.encodeMs()},
         {"time", mClock.getTime()}, {"clock_frame", mClock.getFrame()}, {"events", std::move(events)},
-        {"error", mRenderError.empty() ? mCaptureError : mRenderError},
+        {"error", error},
         {"capturing", bool(mCapture)}, {"captured", mCapturedFrames}
     };
 }

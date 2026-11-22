@@ -64,7 +64,7 @@ bool isMovementKey(Input::Key key)
 } // namespace
 
 RemoteRenderer::RemoteRenderer(ref<Device> device, uint16_t port, uint32_t fps)
-    : mpDevice(std::move(device)), mStream(mpDevice, port, fps)
+    : mpDevice(std::move(device)), mStream(mpDevice, port, fps, uint2(kPreviewSide))
 {
     mpPreview = Fbo::create2D(mpDevice, kPreviewSide, kPreviewSide, ResourceFormat::BGRA8UnormSrgb, ResourceFormat::Unknown);
     mpGraphTarget = mpPreview;
