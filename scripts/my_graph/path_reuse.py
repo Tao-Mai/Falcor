@@ -18,4 +18,6 @@ def render_graph_PathReuse():
 PathReuse = render_graph_PathReuse()
 if "m" in globals():
     m.addGraph(PathReuse)
-    m.script(str(Path(__file__).resolve().parents[1] / "MyPathTracer.py"))
+    scripts_dir = Path(__file__).resolve().parents[1]
+    m.script(str(scripts_dir / "MyPathTracer.py"))
+    m.script(str(scripts_dir / "PG5DTree.py"))
