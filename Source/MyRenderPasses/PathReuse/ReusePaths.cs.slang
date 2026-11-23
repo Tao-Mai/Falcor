@@ -17,7 +17,8 @@ void main(uint threadIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
     const ReuseGroup group = ReuseGroup(groupID);
 
     // 对每个 a1 → b2，记录可见性、贡献和联合密度。
-    group.evaluatePairs(threadIndex);
+    for (uint pair = threadIndex; pair < kPathReuseGroupSize * kPathReuseGroupSize; pair += kGroupThreadCount)
+        group.evaluatePair(pair / kPathReuseGroupSize, pair % kPathReuseGroupSize);
     GroupMemoryBarrierWithGroupSync();
 
     // 按 B 的路径分别归约 BSDF 和 NEE 的联合密度。
@@ -38,20 +39,8 @@ struct ProposalPdfSums
 
 struct ReconnectionTerm
 {
-    float3 contribution;
+    float3 integrand;
     float proposalPdf; // 以面积乘立体角为度量的联合密度。
-
-    static ReconnectionTerm fromSuffix(float3 a1Factor, float pdfA, const SuffixEvaluation suffix)
-    {
-        return {a1Factor * suffix.integrand, pdfA * suffix.pdfW};
-    }
-
-    float3 weighted(float pdfSum, bool isOriginal)
-    {
-        // 原路径已除过自己的采样 PDF，重连项在这里直接除组内密度和。
-        const float sampledPdf = isOriginal ? proposalPdf : 1.f;
-        return pdfSum > 0.f ? contribution * (sampledPdf / pdfSum) : float3(0.f);
-    }
 };
 
 struct ReconnectionEvaluation
@@ -61,23 +50,15 @@ struct ReconnectionEvaluation
 
     static ReconnectionEvaluation original(const SecondaryPathSample sample)
     {
-        ReconnectionEvaluation evaluation;
         const float pdfA = sample.primaryToSecondaryPdfA;
-        evaluation.bsdf = {sample.bsdf.originalEstimate(), pdfA * sample.bsdf.pdfW};
-        evaluation.nee = {sample.nee.originalEstimate(), pdfA * sample.nee.pdfW};
+        const float bsdfPdf = pdfA * sample.bsdf.pdfW;
+        const float neePdf = pdfA * sample.nee.pdfW;
+
+        // 原始估计是 F / q，乘回 q 后和重连项一样存 F。
+        ReconnectionEvaluation evaluation;
+        evaluation.bsdf = {sample.bsdf.originalEstimate() * bsdfPdf, bsdfPdf};
+        evaluation.nee = {sample.nee.originalEstimate() * neePdf, neePdf};
         return evaluation;
-    }
-
-    void addProposalPdfs(inout ProposalPdfSums sums)
-    {
-        sums.bsdf += bsdf.proposalPdf;
-        sums.nee += nee.proposalPdf;
-    }
-
-    void accumulate(const ProposalPdfSums sums, inout float3 color, bool isOriginal = false)
-    {
-        color += bsdf.weighted(sums.bsdf, isOriginal);
-        color += nee.weighted(sums.nee, isOriginal);
     }
 };
 
@@ -140,12 +121,12 @@ struct SurfaceConnection
         if (reuseBsdf)
         {
             const SuffixEvaluation suffix = b2.bsdf.evaluate(b2Shading, b2Material, sg, kUseImportanceSampling, canSampleNee);
-            result.bsdf = ReconnectionTerm.fromSuffix(a1Factor, pdfA, suffix);
+            result.bsdf = {a1Factor * suffix.integrand, pdfA * suffix.pdfW};
         }
         if (reuseNee && canSampleNee)
         {
             const SuffixEvaluation suffix = b2.nee.evaluate(b2Shading, b2Material, sg, kUseImportanceSampling);
-            result.nee = ReconnectionTerm.fromSuffix(a1Factor, pdfA, suffix);
+            result.nee = {a1Factor * suffix.integrand, pdfA * suffix.pdfW};
         }
         return result;
     }
@@ -155,7 +136,7 @@ StructuredBuffer<PathReuseSample> gPathSamples;
 RWTexture2D<float4> gOutputColor;
 ConstantBuffer<ReusePathsParams> gReuseParams;
 
-// A 提供 a1，B 提供 b2 和后缀。矩阵按 [aIndex][bIndex] 索引，对角线保存原路径的估计和 PDF。
+// A 提供 a1，B 提供 b2 和后缀。矩阵按 [aIndex][bIndex] 索引，每格都保存 F 和联合 PDF。
 groupshared uint gVisibility[kPathReuseGroupSize][kPathReuseGroupSize];
 groupshared ReconnectionEvaluation gReconnectionEvaluations[kPathReuseGroupSize][kPathReuseGroupSize];
 groupshared ProposalPdfSums gProposalPdfSums[kPathReuseGroupSize];
@@ -248,19 +229,17 @@ struct ReuseGroup
         gReconnectionEvaluations[aIndex][bIndex] = connection.evaluate(b2, sg);
     }
 
-    void evaluatePairs(uint threadIndex)
-    {
-        for (uint pair = threadIndex; pair < kPathReuseGroupSize * kPathReuseGroupSize; pair += kGroupThreadCount)
-            evaluatePair(pair / kPathReuseGroupSize, pair % kPathReuseGroupSize);
-    }
-
     void sumProposalPdfs(uint a2)
     {
         ProposalPdfSums sums = {};
         for (uint i = 0; i < kPathReuseGroupSize; ++i)
         {
-            if (gVisibility[i][a2] != 0u)
-                gReconnectionEvaluations[i][a2].addProposalPdfs(sums);
+            if (gVisibility[i][a2] == 0u)
+                continue;
+
+            const ReconnectionEvaluation evaluation = gReconnectionEvaluations[i][a2];
+            sums.bsdf += evaluation.bsdf.proposalPdf;
+            sums.nee += evaluation.nee.proposalPdf;
         }
         gProposalPdfSums[a2] = sums;
     }
@@ -272,13 +251,15 @@ struct ReuseGroup
             return;
 
         float3 color = gPathSamples[pathIndex(aPixel)].localRadiance;
-        if (gVisibility[aIndex][aIndex] != 0u)
-            gReconnectionEvaluations[aIndex][aIndex].accumulate(gProposalPdfSums[aIndex], color, true);
-
         for (uint bIndex = 0; bIndex < kPathReuseGroupSize; ++bIndex)
         {
-            if (bIndex != aIndex && gVisibility[aIndex][bIndex] != 0u)
-                gReconnectionEvaluations[aIndex][bIndex].accumulate(gProposalPdfSums[bIndex], color);
+            if (gVisibility[aIndex][bIndex] == 0u)
+                continue;
+
+            const ReconnectionEvaluation evaluation = gReconnectionEvaluations[aIndex][bIndex];
+            const ProposalPdfSums sums = gProposalPdfSums[bIndex];
+            color += sums.bsdf > 0.f ? evaluation.bsdf.integrand / sums.bsdf : float3(0.f);
+            color += sums.nee > 0.f ? evaluation.nee.integrand / sums.nee : float3(0.f);
         }
         gOutputColor[aPixel] = float4(color, 1.f);
     }
