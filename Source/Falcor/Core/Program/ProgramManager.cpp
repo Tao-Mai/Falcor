@@ -31,7 +31,13 @@
 #include "Utils/Logger.h"
 #include "Utils/Timing/CpuTimer.h"
 
+#include <nlohmann/json.hpp>
 #include <slang.h>
+#include <algorithm>
+#include <chrono>
+#include <fstream>
+#include <map>
+#include <mutex>
 
 namespace Falcor
 {
@@ -100,6 +106,59 @@ inline bool doSlangReflection(
     return true;
 }
 
+static std::string shaderPathToUtf8(const std::filesystem::path& path)
+{
+    const auto utf8 = path.generic_u8string();
+    return {utf8.begin(), utf8.end()};
+}
+
+struct ProgramManager::ShaderCompilationDatabase
+{
+    explicit ShaderCompilationDatabase(std::filesystem::path path) : mPath(std::move(path)) {}
+
+    void write(const nlohmann::json& record)
+    {
+        auto programKey = nlohmann::json::array({record.at("modules"), record.at("entryPoints")}).dump();
+        auto serialized = record.dump();
+        std::lock_guard lock(mMutex);
+        mRecords.insert_or_assign(std::move(programKey), std::move(serialized));
+
+        std::filesystem::create_directories(mPath.parent_path());
+        auto temporary = mPath;
+        temporary += ".";
+        temporary += getTempFilePath().filename();
+        temporary += ".tmp";
+        try
+        {
+            std::ofstream stream;
+            stream.exceptions(std::ios::failbit | std::ios::badbit);
+            stream.open(temporary, std::ios::binary | std::ios::trunc);
+            stream << '[';
+            const char* separator = "\n";
+            for (const auto& item : mRecords)
+            {
+                stream << separator << item.second;
+                separator = ",\n";
+            }
+            stream << "\n]\n";
+            stream.close();
+            // Publish a complete snapshot so an editor can read while shaders are being compiled.
+            std::filesystem::rename(temporary, mPath);
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+            throw;
+        }
+    }
+
+private:
+    std::filesystem::path mPath;
+    std::map<std::string, std::string> mRecords;
+    std::mutex mMutex;
+};
+
 ProgramManager::ProgramManager(Device* pDevice) : mpDevice(pDevice)
 {
     // Set global shader defines
@@ -116,6 +175,8 @@ ProgramManager::ProgramManager(Device* pDevice) : mpDevice(pDevice)
     addGlobalDefines(globalDefines);
 
 }
+
+ProgramManager::~ProgramManager() = default;
 
 ref<const ProgramVersion> ProgramManager::createProgramVersion(const Program& program, std::string& log) const
 {
@@ -620,6 +681,24 @@ ProgramManager::ForcedCompilerFlags ProgramManager::getForcedCompilerFlags()
     return mForcedCompilerFlags;
 }
 
+void ProgramManager::setShaderCompilationDatabase(const std::filesystem::path& path)
+{
+    if (path.empty())
+    {
+        mpShaderCompilationDatabase.reset();
+        return;
+    }
+
+    std::error_code error;
+    auto absolutePath = std::filesystem::absolute(path, error);
+    if (error)
+    {
+        logWarning("Cannot resolve shader compilation database path {}: {}", path, error.message());
+        return;
+    }
+    mpShaderCompilationDatabase = std::make_unique<ShaderCompilationDatabase>(std::move(absolutePath));
+}
+
 SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& program) const
 {
     slang::IGlobalSession* pSlangGlobalSession = mpDevice->getSlangGlobalSession();
@@ -633,9 +712,11 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
     // implement file I/O, and this could be used instead of specifying
     // the data directories to Slang.
     //
+    const auto& shaderDirectories = getShaderDirectoriesList();
     std::vector<std::string> searchPaths;
+    searchPaths.reserve(shaderDirectories.size());
     std::vector<const char*> slangSearchPaths;
-    for (auto& path : getShaderDirectoriesList())
+    for (const auto& path : shaderDirectories)
     {
         searchPaths.push_back(path.string());
         slangSearchPaths.push_back(searchPaths.back().data());
@@ -645,7 +726,8 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
 
     slang::TargetDesc targetDesc;
     targetDesc.format = SLANG_TARGET_UNKNOWN;
-    targetDesc.profile = pSlangGlobalSession->findProfile(getSlangProfileString(program.mDesc.shaderModel).c_str());
+    const std::string profile = getSlangProfileString(program.mDesc.shaderModel);
+    targetDesc.profile = pSlangGlobalSession->findProfile(profile.c_str());
 
     if (targetDesc.profile == SLANG_PROFILE_UNKNOWN)
         FALCOR_THROW("Can't find Slang profile for shader model {}", program.mDesc.shaderModel);
@@ -805,6 +887,7 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
             spProcessCommandLineArguments(pSlangRequest, args.data(), (int)args.size());
     }
 
+    std::vector<std::filesystem::path> resolvedSources;
     for (size_t moduleIndex = 0; moduleIndex < program.mDesc.shaderModules.size(); ++moduleIndex)
     {
         const auto& module = program.mDesc.shaderModules[moduleIndex];
@@ -834,6 +917,8 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
                     FALCOR_THROW("Can't find shader file {}", path);
                 }
                 spAddTranslationUnitSourceFile(pSlangRequest, translationUnitIndex, fullPath.string().c_str());
+                if (mpShaderCompilationDatabase)
+                    resolvedSources.push_back(std::move(fullPath));
             }
             else
             {
@@ -854,6 +939,105 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
         for (const auto& entryPoint : entryPointGroup.entryPoints)
         {
             spAddEntryPoint(pSlangRequest, entryPointGroup.shaderModuleIndex, entryPoint.name.c_str(), getSlangStage(entryPoint.type));
+        }
+    }
+
+    if (!resolvedSources.empty())
+    {
+        try
+        {
+            using nlohmann::json;
+            json modules = json::array();
+            std::vector<std::string> moduleFiles;
+            auto resolved = resolvedSources.cbegin();
+            for (const auto& module : program.mDesc.shaderModules)
+            {
+                json sources = json::array();
+                std::string moduleFile;
+                for (const auto& source : module.sources)
+                {
+                    if (source.type == ProgramDesc::ShaderSource::Type::File)
+                    {
+                        const auto& path = *resolved++;
+                        const auto file = shaderPathToUtf8(path);
+                        sources.push_back({{"file", file}});
+                        const auto extension = getExtensionFromPath(path);
+                        const bool isShaderDocument = extension == "slang" || extension == "hlsl" || extension == "slangh" ||
+                                                      extension == "hlsli" || extension == "usf" || extension == "ush";
+                        if (moduleFile.empty() && isShaderDocument)
+                            moduleFile = file;
+                    }
+                    else if (!module.name.empty())
+                    {
+                        // Only named in-memory modules can be resolved through imports.
+                        sources.push_back({{"path", shaderPathToUtf8(source.path)}, {"text", source.string}});
+                    }
+                }
+                modules.push_back({{"name", module.name}, {"sources", std::move(sources)}});
+                moduleFiles.push_back(std::move(moduleFile));
+            }
+
+            json entryPoints = json::array();
+            std::string file;
+            for (const auto& group : program.mDesc.entryPointGroups)
+            {
+                for (const auto& entry : group.entryPoints)
+                {
+                    entryPoints.push_back({
+                        {"module", group.shaderModuleIndex},
+                        {"name", entry.name},
+                        {"stage", getSlangStage(entry.type)},
+                    });
+                }
+                if (file.empty() && !group.entryPoints.empty())
+                    file = moduleFiles.at(group.shaderModuleIndex);
+            }
+            if (file.empty())
+            {
+                const auto firstFile = std::find_if(moduleFiles.begin(), moduleFiles.end(), [](const auto& path) { return !path.empty(); });
+                if (firstFile == moduleFiles.end())
+                    return pSlangRequest;
+                file = *firstFile;
+            }
+
+            json arguments = json::array({
+                shaderPathToUtf8(FALCOR_SLANG_COMPILER),
+                "-profile",
+                profile,
+                "-target",
+                targetDesc.format == SLANG_DXIL ? "dxil" : "spirv",
+                useColumnMajor ? "-matrix-layout-column-major" : "-matrix-layout-row-major",
+            });
+            for (const auto& path : shaderDirectories)
+            {
+                arguments.push_back("-I");
+                arguments.push_back(shaderPathToUtf8(path));
+            }
+            for (const auto& define : slangDefines)
+            {
+                arguments.push_back("-D");
+                arguments.push_back(std::string(define.name) + "=" + define.value);
+            }
+            for (const auto& argument : mGlobalCompilerArguments)
+                arguments.push_back(argument);
+            for (const auto& argument : program.mDesc.compilerArguments)
+                arguments.push_back(argument);
+
+            const auto capturedAt =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            mpShaderCompilationDatabase->write({
+                {"directory", shaderPathToUtf8(std::filesystem::current_path())},
+                {"file", std::move(file)},
+                {"arguments", std::move(arguments)},
+                {"modules", std::move(modules)},
+                {"entryPoints", std::move(entryPoints)},
+                {"compilerVersion", pSlangGlobalSession->getBuildTagString()},
+                {"capturedAt", capturedAt},
+            });
+        }
+        catch (const std::exception& error)
+        {
+            logWarning("Shader compilation database export failed: {}", error.what());
         }
     }
 

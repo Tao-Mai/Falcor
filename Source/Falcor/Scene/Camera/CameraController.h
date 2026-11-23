@@ -157,12 +157,14 @@ namespace Falcor
         - Right mouse button + mouse movement to roll camera (for 6DoF camera controller only).
         - Shift for faster movement.
         - Ctrl for slower movement.
+        With requireRightMouseButton enabled, hold right mouse to look and move with the keyboard.
     */
     template<bool b6DoF>
     class FALCOR_API FirstPersonCameraControllerCommon : public CameraController
     {
     public:
         FirstPersonCameraControllerCommon(const ref<Camera>& pCamera);
+        FirstPersonCameraControllerCommon(const ref<Camera>& pCamera, bool requireRightMouseButton);
 
         /** Handle mouse events
         */
@@ -186,6 +188,7 @@ namespace Falcor
         void resetInputState() override;
 
     private:
+        bool mRequireRightMouseButton;
         bool mIsLeftButtonDown = false;
         bool mIsRightButtonDown = false;
         bool mShouldRotate = false;

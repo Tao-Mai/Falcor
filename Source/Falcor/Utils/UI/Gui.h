@@ -104,6 +104,8 @@ public:
         CloseButton = 0x8,  ///< Add a close button
         NoResize = 0x10,    ///< Disable manual resizing
         AutoResize = 0x20,  ///< Auto resize the window to fit it's content every frame
+        Fixed = 0x40,       ///< Pin the window to a rectangle in framebuffer pixels
+        MenuBar = 0x80,     ///< Include a menu bar inside the window
 
         Default = ShowTitleBar | AllowMove | SetFocus | CloseButton
     };
@@ -693,6 +695,7 @@ public:
      * Add a font
      */
     void addFont(const std::string& name, const std::filesystem::path& path);
+    void addFont(const std::string& name, const std::filesystem::path& path, float pixelSize, bool includeChineseGlyphs);
 
     /**
      * Set the active font
@@ -705,6 +708,10 @@ public:
      * Start a new frame. Must be called at the start of each frame
      */
     void beginFrame();
+    void beginFrame(float elapsedTime);
+
+    /// Returns whether queued input still needs another GUI frame.
+    bool hasPendingInput() const;
 
     /**
      * Render the GUI

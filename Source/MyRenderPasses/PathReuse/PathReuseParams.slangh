@@ -1,0 +1,28 @@
+#pragma once
+#include "Utils/HostDeviceShared.slangh"
+
+BEGIN_NAMESPACE_FALCOR
+
+static const uint kPathReuseTileSide = 4;
+static const uint kPathReuseGroupSize = kPathReuseTileSide * kPathReuseTileSide;
+static const uint kPathReuseThreadsPerAxis = 8;
+static const uint kPathReuseScatterRay = 0;
+static const uint kPathReuseShadowRay = 1;
+static const uint kPathReuseRayTypeCount = 2;
+
+struct TracePathsParams
+{
+    uint frameIndex;
+    uint prngDimension;
+};
+
+struct ReusePathsParams
+{
+    uint frameIndex;
+    uint useNRooks;
+    uint2 tileOffset;
+};
+
+FALCOR_ASSERT_ALIGNMENT_FOR(ReusePathsParams, 16);
+
+END_NAMESPACE_FALCOR

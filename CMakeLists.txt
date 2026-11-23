@@ -44,6 +44,9 @@ set(FALCOR_VALIDATE_HEADERS OFF CACHE BOOL "Enable header validation")
 # If enabled, precompiled headers are used to speed up compilation.
 set(FALCOR_PRECOMPILED_HEADERS ON CACHE BOOL "Enable precompiled headers")
 
+# Copy project shader sources for deployment builds.
+option(FALCOR_COPY_SHADERS "Copy project shaders to the runtime directory" ON)
+
 # -----------------------------------------------------------------------------
 # Check platform
 # -----------------------------------------------------------------------------
@@ -244,6 +247,10 @@ set(SHADER_EXTENSION_REGEX "\.(slang|slangh|hlsli|hlsl)$")
 # Setup build rules to copy all shaders of a target to the output directory.
 # The specified output_dir is relative to the global shader output directory (FALCOR_SHADER_OUTPUT_DIRECTORY).
 function(target_copy_shaders target output_dir)
+    if(NOT FALCOR_COPY_SHADERS)
+        return()
+    endif()
+
     get_target_property(target_source_dir ${target} SOURCE_DIR)
     set(shader_output_dir ${FALCOR_SHADER_OUTPUT_DIRECTORY}/${output_dir})
 
@@ -444,6 +451,7 @@ endif()
 add_subdirectory(Source/Mogwai)
 add_subdirectory(Source/plugins)
 add_subdirectory(Source/RenderPasses)
+add_subdirectory(Source/MyRenderPasses)
 add_subdirectory(Source/Samples)
 add_subdirectory(Source/Tools)
 

@@ -34,12 +34,19 @@
 #include "Utils/Logger.h"
 #include "Utils/UI/InputTypes.h"
 #include "Utils/Scripting/ScriptBindings.h"
+#include <algorithm>
 
 namespace Falcor
 {
 class ApiCallbacks
 {
 public:
+    static void windowRefreshCallback(GLFWwindow* pGlfwWindow)
+    {
+        if (auto* pWindow = static_cast<Window*>(glfwGetWindowUserPointer(pGlfwWindow)))
+            pWindow->mpCallbacks->handleWindowRefresh();
+    }
+
     static void windowSizeCallback(GLFWwindow* pGlfwWindow, int width, int height)
     {
         // We also get here in case the window was minimized, so we need to ignore it
@@ -397,6 +404,7 @@ Window::Window(const Desc& desc, ICallbacks* pCallbacks)
 
     // Create the window
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    const bool centerWindow = desc.centerOnStart && desc.mode == WindowMode::Normal;
     uint32_t w = desc.width;
     uint32_t h = desc.height;
 
@@ -421,7 +429,11 @@ Window::Window(const Desc& desc, ICallbacks* pCallbacks)
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     }
 
+    if (centerWindow)
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     mpGLFWWindow = glfwCreateWindow(w, h, desc.title.c_str(), nullptr, nullptr);
+    if (centerWindow)
+        glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     if (!mpGLFWWindow)
     {
         FALCOR_THROW("Failed to create GLFW window.");
@@ -436,12 +448,32 @@ Window::Window(const Desc& desc, ICallbacks* pCallbacks)
     mApiHandle.window = glfwGetX11Window(mpGLFWWindow);
     FALCOR_ASSERT(mApiHandle.pDisplay != nullptr);
 #endif
+    if (GLFWmonitor* pMonitor = centerWindow ? glfwGetPrimaryMonitor() : nullptr)
+    {
+        int x, y, workWidth, workHeight;
+        glfwGetMonitorWorkarea(pMonitor, &x, &y, &workWidth, &workHeight);
+        int left, top, right, bottom;
+        glfwGetWindowFrameSize(mpGLFWWindow, &left, &top, &right, &bottom);
+        const int maxWidth = workWidth - left - right;
+        const int maxHeight = workHeight - top - bottom;
+        if (maxWidth > 0 && maxHeight > 0)
+        {
+            int width, height;
+            glfwGetWindowSize(mpGLFWWindow, &width, &height);
+            const int fittedWidth = std::min(width, maxWidth);
+            const int fittedHeight = std::min(height, maxHeight);
+            if (fittedWidth != width || fittedHeight != height)
+                glfwSetWindowSize(mpGLFWWindow, fittedWidth, fittedHeight);
+            glfwSetWindowPos(mpGLFWWindow, x + left + (maxWidth - fittedWidth) / 2, y + top + (maxHeight - fittedHeight) / 2);
+        }
+    }
     updateWindowSize();
 
     glfwSetWindowUserPointer(mpGLFWWindow, this);
 
     // Set callbacks
     glfwSetWindowSizeCallback(mpGLFWWindow, ApiCallbacks::windowSizeCallback);
+    glfwSetWindowRefreshCallback(mpGLFWWindow, ApiCallbacks::windowRefreshCallback);
     glfwSetKeyCallback(mpGLFWWindow, ApiCallbacks::keyboardCallback);
     glfwSetMouseButtonCallback(mpGLFWWindow, ApiCallbacks::mouseButtonCallback);
     glfwSetCursorPosCallback(mpGLFWWindow, ApiCallbacks::mouseMoveCallback);
@@ -492,6 +524,7 @@ void Window::setWindowSize(uint32_t width, uint32_t height)
 void Window::shutdown()
 {
     glfwSetWindowShouldClose(mpGLFWWindow, 1);
+    glfwPostEmptyEvent();
 }
 
 bool Window::shouldClose() const
@@ -516,6 +549,14 @@ void Window::resize(uint32_t width, uint32_t height)
     mpCallbacks->handleWindowSizeChange();
 }
 
+struct Window::GamepadData
+{
+    static constexpr int kInvalidID = -1;
+    bool initialized = false;
+    int activeID = kInvalidID;
+    GamepadState previousState;
+};
+
 void Window::msgLoop()
 {
     // Samples often rely on a size change event as part of initialization
@@ -524,8 +565,22 @@ void Window::msgLoop()
 
     while (!shouldClose())
     {
-        pollForEvents();
-        mpCallbacks->handleRenderFrame();
+        if (mpCallbacks->shouldRenderFrame())
+        {
+            pollForEvents();
+        }
+        else
+        {
+            // Gamepad input is polled separately from native window events.
+            if (mpGamepadData && mpGamepadData->activeID != GamepadData::kInvalidID)
+                glfwWaitEventsTimeout(1.0 / 30.0);
+            else
+                glfwWaitEvents();
+            handleGamepadInput();
+        }
+
+        if (!shouldClose() && mpCallbacks->shouldRenderFrame())
+            mpCallbacks->handleRenderFrame();
     }
 }
 
@@ -551,14 +606,6 @@ void Window::pollForEvents()
     glfwPollEvents();
     handleGamepadInput();
 }
-
-struct Window::GamepadData
-{
-    static constexpr int kInvalidID = -1;
-    bool initialized = false;
-    int activeID = kInvalidID;
-    GamepadState previousState;
-};
 
 void Window::handleGamepadInput()
 {

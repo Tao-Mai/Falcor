@@ -71,6 +71,7 @@ struct SampleAppConfig
 
     bool generateShaderDebugInfo = false;
     bool shaderPreciseFloat = false;
+    std::filesystem::path shaderCompilationDatabase; ///< Optional path for exporting runtime shader compiler inputs.
 };
 
 /**
@@ -250,9 +251,9 @@ public:
     bool isUiEnabled() { return mShowUI; }
 
     /**
-     * Pause/resume the renderer. The GUI will still be rendered.
+     * Pause/resume the renderer. During pause the window repaints the frozen frame and GUI on demand.
      */
-    void pauseRenderer(bool pause) { mRendererPaused = pause; }
+    void pauseRenderer(bool pause);
 
     /**
      * Check if the renderer running.
@@ -290,11 +291,18 @@ public:
      */
     static std::string getKeyboardShortcutsStr();
 
+protected:
+    /// Deliver input to the application during an interaction started in its viewport.
+    virtual bool hasInputCapture() const { return false; }
+    Gui& getGui() { return *mpGui; }
+
 private:
     // Implementation of IWindow::Callbacks
 
     void handleWindowSizeChange() override;
     void handleRenderFrame() override;
+    void handleWindowRefresh() override { mRedrawRequested = true; }
+    bool shouldRenderFrame() const override;
     void handleKeyboardEvent(const KeyboardEvent& keyEvent) override;
     void handleMouseEvent(const MouseEvent& mouseEvent) override;
     void handleGamepadEvent(const GamepadEvent& gamepadEvent) override;
@@ -334,6 +342,8 @@ private:
 
     bool mShouldTerminate = false; ///< True if application should terminate.
     bool mRendererPaused = false;  ///< True if rendering is paused.
+    bool mRedrawRequested = true;  ///< Draw the window on the next event-loop iteration.
+    bool mRetriedPausedPresent = false;
     bool mVsyncOn = false;
     bool mShowUI = true;
     bool mCaptureScreen = false;

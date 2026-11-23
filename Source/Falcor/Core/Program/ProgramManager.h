@@ -30,6 +30,7 @@
 #include "Core/Macros.h"
 #include "Core/API/fwd.h"
 
+#include <filesystem>
 #include <memory>
 
 namespace Falcor
@@ -39,6 +40,7 @@ class FALCOR_API ProgramManager
 {
 public:
     ProgramManager(Device* pDevice);
+    ~ProgramManager();
 
     /**
      * Defines flags that should be forcefully disabled or enabled on all shaders.
@@ -115,6 +117,9 @@ public:
      */
     const std::vector<std::string>& getGlobalCompilerArguments() const { return mGlobalCompilerArguments; }
 
+    /// Start a new runtime shader compilation capture. An empty path disables capture.
+    void setShaderCompilationDatabase(const std::filesystem::path& path);
+
     /**
      * Enable/disable global generation of shader debug info.
      * @param[in] enabled Enable/disable.
@@ -145,6 +150,8 @@ public:
     void resetCompilationStats() { mCompilationStats = {}; }
 
 private:
+    struct ShaderCompilationDatabase;
+
     SlangCompileRequest* createSlangCompileRequest(const Program& program) const;
 
     Device* mpDevice;
@@ -154,6 +161,7 @@ private:
 
     DefineList mGlobalDefineList;
     std::vector<std::string> mGlobalCompilerArguments;
+    std::unique_ptr<ShaderCompilationDatabase> mpShaderCompilationDatabase;
     bool mGenerateDebugInfo = false;
     ForcedCompilerFlags mForcedCompilerFlags;
 

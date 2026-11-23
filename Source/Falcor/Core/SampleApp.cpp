@@ -64,6 +64,8 @@ SampleApp::SampleApp(const SampleAppConfig& config)
 
     // Create GPU device
     mpDevice = make_ref<Device>(config.deviceDesc);
+    if (!config.shaderCompilationDatabase.empty())
+        mpDevice->getProgramManager()->setShaderCompilationDatabase(config.shaderCompilationDatabase);
 
     if (!config.headless)
     {
@@ -183,9 +185,36 @@ void SampleApp::handleRenderFrame()
     renderFrame();
 }
 
+bool SampleApp::shouldRenderFrame() const
+{
+    if (!mRendererPaused || mRedrawRequested)
+        return true;
+
+    const bool clockNeedsFrames = mClock.shouldExit() ||
+        (!mClock.isPaused() && (mClock.getExitFrame() || mClock.getExitTime()));
+    const bool guiNeedsFrames = mShowUI && mpGui->hasPendingInput();
+    return (clockNeedsFrames || guiNeedsFrames) && (!mpSwapchain || !mpSwapchain->isOccluded());
+}
+
+void SampleApp::pauseRenderer(bool pause)
+{
+    if (mRendererPaused == pause)
+        return;
+
+    mRendererPaused = pause;
+    mRedrawRequested = true;
+    mRetriedPausedPresent = false;
+    if (!pause)
+        mFrameRate.reset();
+}
+
 void SampleApp::handleKeyboardEvent(const KeyboardEvent& keyEvent)
 {
-    if (mShowUI && mpGui->onKeyboardEvent(keyEvent))
+    mRedrawRequested = true;
+    const bool inputCaptured = hasInputCapture();
+    if (inputCaptured && keyEvent.type == KeyboardEvent::Type::Input)
+        return;
+    if (mShowUI && mpGui->onKeyboardEvent(keyEvent) && !inputCaptured)
         return;
     mInputState.onKeyEvent(keyEvent);
     if (onKeyEvent(keyEvent))
@@ -203,7 +232,7 @@ void SampleApp::handleKeyboardEvent(const KeyboardEvent& keyEvent)
             {
             case Input::Key::Pause:
             case Input::Key::Space:
-                mRendererPaused = !mRendererPaused;
+                pauseRenderer(!mRendererPaused);
                 break;
             default:
                 break;
@@ -254,7 +283,8 @@ void SampleApp::handleKeyboardEvent(const KeyboardEvent& keyEvent)
 
 void SampleApp::handleMouseEvent(const MouseEvent& mouseEvent)
 {
-    if (mShowUI && mpGui->onMouseEvent(mouseEvent))
+    mRedrawRequested = true;
+    if (mShowUI && mpGui->onMouseEvent(mouseEvent) && !hasInputCapture())
         return;
     mInputState.onMouseEvent(mouseEvent);
     if (onMouseEvent(mouseEvent))
@@ -265,6 +295,7 @@ void SampleApp::handleMouseEvent(const MouseEvent& mouseEvent)
 
 void SampleApp::handleGamepadEvent(const GamepadEvent& gamepadEvent)
 {
+    mRedrawRequested = true;
     onGamepadEvent(gamepadEvent);
 }
 
@@ -275,6 +306,7 @@ void SampleApp::handleGamepadState(const GamepadState& gamepadState)
 
 void SampleApp::handleDroppedFile(const std::filesystem::path& path)
 {
+    mRedrawRequested = true;
     onDroppedFile(path);
 }
 
@@ -400,7 +432,7 @@ void SampleApp::renderGlobalUI(Gui* pGui)
         controlsGroup.separator();
 
         if (controlsGroup.button(mRendererPaused ? "Resume Rendering" : "Pause Rendering"))
-            mRendererPaused = !mRendererPaused;
+            pauseRenderer(!mRendererPaused);
         controlsGroup.tooltip(
             "Freeze the renderer and keep displaying the last rendered frame. The renderer will keep accepting mouse/keyboard/GUI "
             "messages. Changes in the UI will not be reflected in the displayed image until the renderer is unfrozen"
@@ -430,7 +462,8 @@ void SampleApp::renderUI()
 
     if (mShowUI || pProfiler->isEnabled())
     {
-        mpGui->beginFrame();
+        const float elapsedTime = (float)mFrameRate.getLastFrameTime();
+        mpGui->beginFrame(elapsedTime);
 
         if (mShowUI)
             onGuiRender(mpGui.get());
@@ -455,13 +488,14 @@ void SampleApp::renderUI()
             pProfiler->setEnabled(open);
         }
 
-        mpGui->render(pRenderContext, mpTargetFBO, (float)mFrameRate.getLastFrameTime());
+        mpGui->render(pRenderContext, mpTargetFBO, elapsedTime);
     }
 }
 
 void SampleApp::renderFrame()
 {
     FALCOR_ASSERT(mpDevice);
+    mRedrawRequested = false;
 
     // Skip rendering if window is occluded.
     if (mpSwapchain && mpSwapchain->isOccluded())
@@ -525,6 +559,11 @@ void SampleApp::renderFrame()
             logInfo("Recreating out-of-date swapchain.");
             const auto size = mpWindow->getClientAreaSize();
             mpSwapchain->resize(size.x, size.y);
+            if (mRendererPaused && !mRetriedPausedPresent)
+            {
+                mRetriedPausedPresent = true;
+                mRedrawRequested = true;
+            }
         }
         else
         {
@@ -533,6 +572,7 @@ void SampleApp::renderFrame()
             pRenderContext->resourceBarrier(pSwapchainImage, Resource::State::Present);
             pRenderContext->submit();
             mpSwapchain->present();
+            mRetriedPausedPresent = false;
         }
     }
 
@@ -545,6 +585,8 @@ void SampleApp::renderFrame()
 
 void SampleApp::resizeTargetFBO(uint32_t width, uint32_t height)
 {
+    mRedrawRequested = true;
+    mRetriedPausedPresent = false;
     // Resize target frame buffer.
     auto pPrevFBO = mpTargetFBO;
     mpTargetFBO = Fbo::create2D(mpDevice, width, height, pPrevFBO->getDesc());

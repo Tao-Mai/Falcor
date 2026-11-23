@@ -138,7 +138,8 @@ namespace Falcor
         {
             FirstPerson,
             Orbiter,
-            SixDOF
+            SixDOF,
+            Editor
         };
 
         enum class SDFGridIntersectionMethod : uint32_t

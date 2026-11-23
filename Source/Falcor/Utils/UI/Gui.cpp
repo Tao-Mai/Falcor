@@ -39,6 +39,7 @@
 #include "Utils/UI/SpectrumUI.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <map>
 
@@ -73,17 +74,6 @@ private:
         int32_t currentItem = -1;
     };
     std::unordered_map<std::string, ComboData> mDropDownValues;
-
-    // This struct is used to cache the mouse events
-    struct MouseEvents
-    {
-        bool buttonPressed[3] = {0};
-        bool buttonReleased[3] = {0};
-    };
-
-    MouseEvents mMouseEvents;
-    void setIoMouseEvents();
-    void resetMouseEvents();
 
     ref<Device> mpDevice;
     ImGuiContext* mpContext;
@@ -446,23 +436,6 @@ bool GuiImpl::addCheckboxes(const char label[], bool* pData, uint32_t numCheckbo
     return modified;
 }
 
-void GuiImpl::setIoMouseEvents()
-{
-    ImGuiIO& io = ImGui::GetIO();
-    memcpy(io.MouseDown, mMouseEvents.buttonPressed, sizeof(mMouseEvents.buttonPressed));
-}
-
-void GuiImpl::resetMouseEvents()
-{
-    for (size_t i = 0; i < std::size(mMouseEvents.buttonPressed); i++)
-    {
-        if (mMouseEvents.buttonReleased[i])
-        {
-            mMouseEvents.buttonPressed[i] = mMouseEvents.buttonReleased[i] = false;
-        }
-    }
-}
-
 bool GuiImpl::beginMenu(const char* name)
 {
     return ImGui::BeginMenu(name);
@@ -519,11 +492,16 @@ bool GuiImpl::pushWindow(const char label[], bool& open, uint2 size, uint2 pos, 
         }
     }
 
-    ImVec2 fPos(pos.x * mScaleFactor, pos.y * mScaleFactor);
-    ImVec2 fSize(size.x * mScaleFactor, size.y * mScaleFactor);
-    ImGui::SetNextWindowSize(fSize, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(fPos, ImGuiCond_FirstUseEver);
+    const bool fixed = is_set(flags, Gui::WindowFlags::Fixed);
+    const float scale = fixed ? 1.f : mScaleFactor;
+    const auto condition = fixed ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+    ImGui::SetNextWindowSize(ImVec2(size.x * scale, size.y * scale), condition);
+    ImGui::SetNextWindowPos(ImVec2(pos.x * scale, pos.y * scale), condition);
     int imguiFlags = 0;
+    if (fixed)
+        imguiFlags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings;
+    if (is_set(flags, Gui::WindowFlags::MenuBar))
+        imguiFlags |= ImGuiWindowFlags_MenuBar;
     if (!is_set(flags, Gui::WindowFlags::ShowTitleBar))
         imguiFlags |= ImGuiWindowFlags_NoTitleBar;
     if (!is_set(flags, Gui::WindowFlags::AllowMove))
@@ -1221,8 +1199,15 @@ float4 Gui::pickUniqueColor(const std::string& key)
 
 void Gui::addFont(const std::string& name, const std::filesystem::path& path)
 {
-    float size = 14.0f * mpWrapper->mScaleFactor;
-    ImFont* pFont = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.string().c_str(), size);
+    addFont(name, path, 14.f * mpWrapper->mScaleFactor, false);
+}
+
+void Gui::addFont(const std::string& name, const std::filesystem::path& path, float pixelSize, bool includeChineseGlyphs)
+{
+    ImGui::SetCurrentContext(mpWrapper->mpContext);
+    auto* pAtlas = ImGui::GetIO().Fonts;
+    const auto* pRanges = includeChineseGlyphs ? pAtlas->GetGlyphRangesChineseFull() : nullptr;
+    ImFont* pFont = pAtlas->AddFontFromFileTTF(path.string().c_str(), pixelSize, nullptr, pRanges);
     if (!pFont)
         FALCOR_THROW("Failed to load font from '{}'.", path);
     mpWrapper->mFontMap[name] = pFont;
@@ -1236,8 +1221,14 @@ void Gui::setActiveFont(const std::string& font)
     {
         logWarning("Can't find a font named '{}'.", font);
         mpWrapper->mpActiveFont = nullptr;
+        return;
     }
     mpWrapper->mpActiveFont = it->second;
+    if (font.empty())
+    {
+        ImGui::SetCurrentContext(mpWrapper->mpContext);
+        ImGui::GetIO().FontDefault = it->second;
+    }
 }
 
 ImFont* Gui::getFont(std::string f)
@@ -1250,8 +1241,20 @@ ImFont* Gui::getFont(std::string f)
 
 void Gui::beginFrame()
 {
+    beginFrame(0.f);
+}
+
+void Gui::beginFrame(float elapsedTime)
+{
     ImGui::SetCurrentContext(mpWrapper->mpContext);
+    if (elapsedTime > 0.f)
+        ImGui::GetIO().DeltaTime = elapsedTime;
     ImGui::NewFrame();
+}
+
+bool Gui::hasPendingInput() const
+{
+    return !mpWrapper->mpContext->InputEventsQueue.empty();
 }
 
 void Gui::render(RenderContext* pContext, const ref<Fbo>& pFbo, float elapsedTime)
@@ -1261,13 +1264,8 @@ void Gui::render(RenderContext* pContext, const ref<Fbo>& pFbo, float elapsedTim
     while (mpWrapper->mGroupStackSize)
         mpWrapper->endGroup();
 
-    // Set the mouse state
-    mpWrapper->setIoMouseEvents();
-
     ImGui::Render();
     ImDrawData* pDrawData = ImGui::GetDrawData();
-
-    mpWrapper->resetMouseEvents();
 
     if (pDrawData->CmdListsCount > 0)
     {
@@ -1369,13 +1367,13 @@ bool Gui::onMouseEvent(const MouseEvent& event)
         switch (event.button)
         {
         case Input::MouseButton::Left:
-            mpWrapper->mMouseEvents.buttonPressed[0] = isDown;
+            io.AddMouseButtonEvent(0, isDown);
             break;
         case Input::MouseButton::Right:
-            mpWrapper->mMouseEvents.buttonPressed[1] = isDown;
+            io.AddMouseButtonEvent(1, isDown);
             break;
         case Input::MouseButton::Middle:
-            mpWrapper->mMouseEvents.buttonPressed[2] = isDown;
+            io.AddMouseButtonEvent(2, isDown);
             break;
         default:
             break;
@@ -1383,11 +1381,10 @@ bool Gui::onMouseEvent(const MouseEvent& event)
     }
     break;
     case MouseEvent::Type::Move:
-        io.MousePos.x = event.pos.x * io.DisplaySize.x;
-        io.MousePos.y = event.pos.y * io.DisplaySize.y;
+        io.AddMousePosEvent(event.pos.x * io.DisplaySize.x, event.pos.y * io.DisplaySize.y);
         break;
     case MouseEvent::Type::Wheel:
-        io.MouseWheel += event.wheelDelta.y;
+        io.AddMouseWheelEvent(0.f, event.wheelDelta.y);
         break;
     }
 

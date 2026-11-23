@@ -70,12 +70,13 @@ public:
         WindowMode mode = WindowMode::Normal; ///< Window mode. In full screen mode, width and height will be ignored.
         bool resizableWindow = true;          ///< Allow the user to resize the window.
         bool enableVSync = false;             ///< Controls vertical-sync.
+        bool centerOnStart = false;           ///< Center normal windows in the primary monitor's work area.
     };
 
     /**
      * Callbacks interface to be used when creating a new object
      */
-    class ICallbacks
+    class FALCOR_API ICallbacks
     {
     public:
         virtual void handleWindowSizeChange() = 0;
@@ -85,6 +86,8 @@ public:
         virtual void handleGamepadEvent(const GamepadEvent& gamepadEvent) = 0;
         virtual void handleGamepadState(const GamepadState& gamepadState) = 0;
         virtual void handleDroppedFile(const std::filesystem::path& path) = 0;
+        virtual void handleWindowRefresh() {}
+        virtual bool shouldRenderFrame() const { return true; }
     };
 
     /**

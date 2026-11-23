@@ -140,7 +140,14 @@ namespace Falcor
     }
 
     template<bool b6DoF>
-    FirstPersonCameraControllerCommon<b6DoF>::FirstPersonCameraControllerCommon(const ref<Camera>& pCamera) : CameraController(pCamera)
+    FirstPersonCameraControllerCommon<b6DoF>::FirstPersonCameraControllerCommon(const ref<Camera>& pCamera)
+        : FirstPersonCameraControllerCommon(pCamera, false)
+    {}
+
+    template<bool b6DoF>
+    FirstPersonCameraControllerCommon<b6DoF>::FirstPersonCameraControllerCommon(const ref<Camera>& pCamera, bool requireRightMouseButton)
+        : CameraController(pCamera)
+        , mRequireRightMouseButton(requireRightMouseButton)
     {
         mTimer.update();
     }
@@ -148,6 +155,8 @@ namespace Falcor
     template<bool b6DoF>
     bool FirstPersonCameraControllerCommon<b6DoF>::onKeyEvent(const KeyboardEvent& event)
     {
+        if (mRequireRightMouseButton && !mIsRightButtonDown) return false;
+
         bool handled = false;
 
         if (event.type == KeyboardEvent::Type::KeyPressed || event.type == KeyboardEvent::Type::KeyReleased)
@@ -256,11 +265,12 @@ namespace Falcor
 
                 float3 viewDir = normalize(camTarget - camPos);
 
-                if (mIsLeftButtonDown || anyGamepadRotation)
+                const bool mouseLook = mShouldRotate && (mRequireRightMouseButton ? mIsRightButtonDown : mIsLeftButtonDown);
+                if (mouseLook || anyGamepadRotation)
                 {
                     float3 sideway = cross(viewDir, normalize(camUp));
 
-                    float2 mouseRotation = mIsLeftButtonDown ? mMouseDelta * mSpeedModifier : float2(0.f);
+                    float2 mouseRotation = mouseLook ? mMouseDelta * mSpeedModifier : float2(0.f);
                     float2 gamepadRotation = anyGamepadRotation ? mGamepadRightStick * kGamepadRotationSpeed * elapsedTime : float2(0.f);
                     float2 rotation = mouseRotation + gamepadRotation;
 
@@ -280,7 +290,7 @@ namespace Falcor
                     dirty = true;
                 }
 
-                if (b6DoF && mIsRightButtonDown)
+                if (b6DoF && mIsRightButtonDown && !mRequireRightMouseButton)
                 {
                     // Rotate around x-axis
                     quatf q = math::quatFromAngleAxis(mMouseDelta.x * mSpeedModifier, viewDir);
@@ -347,7 +357,7 @@ namespace Falcor
         switch(event.type)
         {
         case MouseEvent::Type::ButtonDown:
-            if (event.button == Input::MouseButton::Left)
+            if (event.button == Input::MouseButton::Left && !mRequireRightMouseButton)
             {
                 mLastMousePos = event.pos;
                 mIsLeftButtonDown = true;
@@ -357,6 +367,7 @@ namespace Falcor
             {
                 mLastMousePos = event.pos;
                 mIsRightButtonDown = true;
+                if (mRequireRightMouseButton) mShouldRotate = false;
                 handled = true;
             }
             break;
@@ -370,6 +381,11 @@ namespace Falcor
             {
                 handled = mIsRightButtonDown;
                 mIsRightButtonDown = false;
+                if (mRequireRightMouseButton)
+                {
+                    mMovement.reset();
+                    mSpeedModifier = 1.f;
+                }
             }
             break;
         case MouseEvent::Type::Move:
@@ -396,6 +412,7 @@ namespace Falcor
         mIsRightButtonDown  = false;
         mShouldRotate       = false;
         mMovement.reset();
+        mSpeedModifier      = 1.f;
 
         mGamepadLeftStick       = float2(0.f);
         mGamepadRightStick      = float2(0.f);

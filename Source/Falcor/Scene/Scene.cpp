@@ -135,6 +135,7 @@ namespace Falcor
             { (uint32_t)Scene::CameraControllerType::FirstPerson, "First Person" },
             { (uint32_t)Scene::CameraControllerType::Orbiter, "Orbiter" },
             { (uint32_t)Scene::CameraControllerType::SixDOF, "6-DOF" },
+            { (uint32_t)Scene::CameraControllerType::Editor, "Editor (RMB + WASD)" },
         };
 
         // Checks if the transform flips the coordinate system handedness (its determinant is negative).
@@ -3959,6 +3960,9 @@ namespace Falcor
         {
         case CameraControllerType::FirstPerson:
             mpCamCtrl = std::make_unique<FirstPersonCameraController>(camera);
+            break;
+        case CameraControllerType::Editor:
+            mpCamCtrl = std::make_unique<FirstPersonCameraController>(camera, true);
             break;
         case CameraControllerType::Orbiter:
             mpCamCtrl = std::make_unique<OrbiterCameraController>(camera);

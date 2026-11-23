@@ -49,9 +49,9 @@ namespace Mogwai
 
         void renderMainMenu(Gui* pGui);
         void renderOverlay(Gui* pGui);
-        void renderGraphs(Gui* pGui);
-        void renderTimeSettings(Gui* pGui);
-        void renderWindowSettings(Gui* pGui);
+        void renderGraphs(Gui::Window& w);
+        void renderTimeSettings(Gui::Window& w);
+        void renderWindowSettings(Gui::Window& w);
         void selectNextGraph();
         void exitIfNeeded();
 

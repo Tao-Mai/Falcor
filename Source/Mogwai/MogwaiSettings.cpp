@@ -30,6 +30,7 @@
 #include "Core/Program/ProgramManager.h"
 #include "Utils/Scripting/Console.h"
 #include "Utils/Settings/Settings.h"
+#include <imgui.h>
 #include <iomanip>
 #include <sstream>
 
@@ -40,6 +41,7 @@ namespace Mogwai
         void shortcuts()
         {
             constexpr char help[] =
+                "Hold right mouse to look around and move with W/A/S/D\n"
                 "F1 - Show the help message\n"
                 "F9 - Show/hide the time\n"
                 "F6 - Show/hide the graph UI\n"
@@ -55,13 +57,6 @@ namespace Mogwai
             std::string s = Renderer::getVersionString() + "\n";
             s += "Powered by Falcor " + Falcor::getLongVersionString();
             msgBox("About", s);
-        }
-
-        void showFps(Gui* pGui, Renderer* pRenderer)
-        {
-            Gui::Window w(pGui, "##FPS", { 0, 0 }, { 10, 25 }, Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::SetFocus);
-            std::string msg = pRenderer->getFrameRate().getMsg(pRenderer->isVsyncEnabled());
-            w.text(msg);
         }
 
         void winSizeUI(Gui::Window& w, Renderer* pRenderer)
@@ -139,16 +134,14 @@ namespace Mogwai
         }
     }
 
-    void MogwaiSettings::renderWindowSettings(Gui* pGui)
+    void MogwaiSettings::renderWindowSettings(Gui::Window& w)
     {
-        Gui::Window w(pGui, "Window", mShowWinSize, { 0, 0 }, { 350, 300 }, Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::CloseButton);
         winSizeUI(w, mpRenderer);
+        w.separator();
     }
 
-    void MogwaiSettings::renderTimeSettings(Gui* pGui)
+    void MogwaiSettings::renderTimeSettings(Gui::Window& w)
     {
-        Gui::Window w(pGui, "Time", mShowTime, { 0, 0 }, { 350, 25 }, Gui::WindowFlags::AllowMove | Gui::WindowFlags::AutoResize | Gui::WindowFlags::ShowTitleBar | Gui::WindowFlags::CloseButton);
-
         Clock& clock = mpRenderer->getGlobalClock();
         clock.renderUI(w);
         w.separator(2);
@@ -164,6 +157,7 @@ namespace Mogwai
             if (exitFrame) s << (exitFrame - clock.getFrame()) << " frames";
             w.text(s.str());
         }
+        w.separator();
     }
 
     // DEMO21 Opera
@@ -188,12 +182,9 @@ namespace Mogwai
         mpRenderer->setActiveGraph((curIdx + 1) % mpRenderer->mGraphs.size());
     }
 
-    void MogwaiSettings::renderGraphs(Gui* pGui)
+    void MogwaiSettings::renderGraphs(Gui::Window& w)
     {
-        if (!mShowGraphUI || mpRenderer->mGraphs.empty()) return;
-
-        Gui::Window w(pGui, "Graphs", mShowGraphUI, { 300, 600 }, { 10, 80 }, Gui::WindowFlags::Default);
-        if (!mShowGraphUI) return;
+        if (mpRenderer->mGraphs.empty()) return;
 
         if (mpRenderer->mEditorProcess == 0)
         {
@@ -265,12 +256,12 @@ namespace Mogwai
 
     void MogwaiSettings::renderMainMenu(Gui* pGui)
     {
-        if (mAutoHideMenu && mMousePosition.y >= 20) return;
+        if (mAutoHideMenu && mMousePosition.y >= ImGui::GetFrameHeight()) return;
 
-        auto m = Gui::MainMenu(pGui);
+        if (!ImGui::BeginMenuBar()) return;
 
         {
-            auto file = m.dropdown("File");
+            auto file = Gui::Menu::Dropdown(pGui, "File");
             if (file.item("Load Script", "Ctrl+O")) mpRenderer->loadScriptDialog();
             if (file.item("Save Config")) mpRenderer->saveConfigDialog();
             if (file.item("Load Scene", "Ctrl+Shift+O")) mpRenderer->loadSceneDialog();
@@ -305,7 +296,7 @@ namespace Mogwai
         }
 
         {
-            auto view = m.dropdown("View");
+            auto view = Gui::Menu::Dropdown(pGui, "View");
             view.item("Graph UI", mShowGraphUI, "F6");
             view.item("Overlay UI", mShowOverlayUI, "F7");
             view.item("Auto Hide", mAutoHideMenu, "F11");
@@ -326,21 +317,42 @@ namespace Mogwai
         }
 
         {
-            auto help = m.dropdown("Help");
+            auto help = Gui::Menu::Dropdown(pGui, "Help");
             if (help.item("Shortcuts")) shortcuts();
             if (help.item("About")) about();
         }
+        ImGui::EndMenuBar();
     }
 
-    void MogwaiSettings::renderUI(Gui* pGui__)
+    void MogwaiSettings::renderUI(Gui* pGui)
     {
-        Gui* pGui = (Gui*)pGui__;
-        renderMainMenu(pGui);
-        renderGraphs(pGui);
-        if (mShowFps) showFps(pGui, mpRenderer);
-        if (mShowTime) renderTimeSettings(pGui);
-        if (mShowWinSize) renderWindowSettings(pGui);
-        mpRenderer->getConsole().render(pGui__, mShowConsole);
+        const uint4 panel = mpRenderer->getControlPanelRect();
+        if (panel.z > panel.x && panel.w > 0)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+            Gui::Window w(
+                pGui,
+                "Controls##Mogwai",
+                uint2(panel.z - panel.x, panel.w),
+                uint2(panel.x, 0),
+                Gui::WindowFlags::Fixed | Gui::WindowFlags::MenuBar
+            );
+            ImGui::PopStyleVar();
+
+            renderMainMenu(pGui);
+            if (mShowFps)
+            {
+                const auto status = mpRenderer->isRendererPaused()
+                    ? "Rendering paused"
+                    : mpRenderer->getFrameRate().getMsg(mpRenderer->isVsyncEnabled());
+                w.text(status);
+                w.separator();
+            }
+            if (mShowTime) renderTimeSettings(w);
+            if (mShowWinSize) renderWindowSettings(w);
+            if (mShowGraphUI) renderGraphs(w);
+        }
+        mpRenderer->getConsole().render(pGui, mShowConsole);
     }
 
     bool MogwaiSettings::mouseEvent(const MouseEvent& e)

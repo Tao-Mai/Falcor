@@ -66,6 +66,8 @@ namespace Mogwai
         , mOptions(options)
         , mAppData(kAppDataPath)
     {
+        if (getWindow())
+            mpRenderFbo = Fbo::create2D(getDevice(), kRenderSize, kRenderSize, getTargetFbo()->getDesc());
         setActivePythonRenderGraphDevice(getDevice());
     }
 
@@ -101,6 +103,18 @@ namespace Mogwai
 
     void Renderer::onLoad(RenderContext* pRenderContext)
     {
+#if FALCOR_WINDOWS
+        if (auto windowsDirectory = getEnvironmentVariable("WINDIR"); getWindow() && windowsDirectory)
+        {
+            const auto fontPath = std::filesystem::path(*windowsDirectory) / "Fonts" / "msyh.ttc";
+            if (std::filesystem::is_regular_file(fontPath))
+            {
+                getGui().addFont("", fontPath, 18.f, true);
+                getGui().setActiveFont("");
+            }
+        }
+#endif
+
         // Load all plugins
         PluginManager::instance().loadAllPlugins();
 
@@ -426,7 +440,7 @@ namespace Mogwai
         // Setup graph data.
         data = {};
         data.pGraph = pGraph;
-        data.pGraph->onResize(getTargetFbo().get());
+        data.pGraph->onResize(getRenderFbo().get());
         data.pGraph->setScene(mpScene);
         if (data.pGraph->getOutputCount() != 0)
         {
@@ -582,9 +596,11 @@ namespace Mogwai
         {
             mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
 
-            const auto& pFbo = getTargetFbo();
+            const auto& pFbo = getRenderFbo();
             float ratio = float(pFbo->getWidth()) / float(pFbo->getHeight());
             mpScene->setCameraAspectRatio(ratio);
+            if (getWindow() && mpScene->getCameraControllerType() == Scene::CameraControllerType::FirstPerson)
+                mpScene->setCameraController(Scene::CameraControllerType::Editor);
 
             if (mpSampler == nullptr)
             {
@@ -692,11 +708,12 @@ namespace Mogwai
             pGraph->compile(pRenderContext);
         }
 
-        beginFrame(pRenderContext, pTargetFbo);
+        const auto& pRenderFbo = getRenderFbo();
+        beginFrame(pRenderContext, pRenderFbo);
 
         // Clear frame buffer.
         const float4 clearColor(0.38f, 0.52f, 0.10f, 1);
-        pRenderContext->clearFbo(pTargetFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
+        pRenderContext->clearFbo(pRenderFbo.get(), clearColor, 1.0f, 0, FboAttachmentType::All);
 
         if (mActiveGraph < mGraphs.size())
         {
@@ -728,16 +745,19 @@ namespace Mogwai
             {
                 ref<Texture> pOutTex = pGraph->getOutput(mGraphs[mActiveGraph].mainOutput)->asTexture();
                 FALCOR_ASSERT(pOutTex);
-                pRenderContext->blit(pOutTex->getSRV(), pTargetFbo->getRenderTargetView(0));
+                pRenderContext->blit(pOutTex->getSRV(), pRenderFbo->getRenderTargetView(0));
             }
 
             if (getSettings().getOption("PipedOutput:enable", false))
             {
-                // DEMO21 Opera -- this specific string should probably disappear
-                static std::string defaultFFMPEGCmd("ffmpeg -r 30 -f rawvideo -pix_fmt rgba -s 1920x1080 -i - "
-                    "-threads 0 -preset medium -y -pix_fmt yuv420p -crf 20 -vf colorchannelmixer=rr=0:rb=1:br=1:bb=0 output.mp4");
                 if (!mPipedOutput)
                 {
+                    const std::string defaultFFMPEGCmd = fmt::format(
+                        "ffmpeg -r 30 -f rawvideo -pix_fmt rgba -s {}x{} -i - "
+                        "-threads 0 -preset medium -y -pix_fmt yuv420p -crf 20 -vf colorchannelmixer=rr=0:rb=1:br=1:bb=0 output.mp4",
+                        pRenderFbo->getWidth(),
+                        pRenderFbo->getHeight()
+                    );
                     std::string ffmepgCmd = getSettings().getOption("PipedOutput:cmd", defaultFFMPEGCmd);
 #if FALCOR_WINDOWS
                     mPipedOutput = _popen(ffmepgCmd.c_str(), "wb");
@@ -751,15 +771,42 @@ namespace Mogwai
 
                 if (mPipedOutput)
                 {
-                    Falcor::ref<Texture> framebufferTexture = pTargetFbo->getColorTexture(0);
+                    Falcor::ref<Texture> framebufferTexture = pRenderFbo->getColorTexture(0);
                     uint32_t subresource = framebufferTexture->getSubresourceIndex(0, 0);
                     std::vector<uint8_t> framebufferData = pRenderContext->readTextureSubresource(framebufferTexture.get(), subresource);
-                    fwrite(&framebufferData[0], 4 * pTargetFbo->getWidth() * pTargetFbo->getHeight(), 1, mPipedOutput);
+                    fwrite(&framebufferData[0], 4 * pRenderFbo->getWidth() * pRenderFbo->getHeight(), 1, mPipedOutput);
                 }
             }
         }
 
-        endFrame(pRenderContext, pTargetFbo);
+        endFrame(pRenderContext, pRenderFbo);
+        if (mpRenderFbo)
+        {
+            const uint32_t side = getControlPanelRect().x;
+            pRenderContext->clearFbo(pTargetFbo.get(), float4(0.06f, 0.06f, 0.06f, 1.f), 1.f, 0, FboAttachmentType::All);
+            pRenderContext->blit(
+                pRenderFbo->getColorTexture(0)->getSRV(),
+                pTargetFbo->getRenderTargetView(0),
+                RenderContext::kMaxRect,
+                uint4(0, 0, side, side)
+            );
+        }
+    }
+
+    uint4 Renderer::getControlPanelRect() const
+    {
+        const auto& pFbo = getTargetFbo();
+        const uint32_t panelWidth = std::min(kControlPanelWidth, pFbo->getWidth() / 2);
+        const uint32_t panelHeight = std::min(kRenderSize, pFbo->getHeight());
+        const uint32_t viewportSize = std::min(panelHeight, pFbo->getWidth() - panelWidth);
+        return uint4(viewportSize, 0, viewportSize + panelWidth, panelHeight);
+    }
+
+    bool Renderer::hasInputCapture() const
+    {
+        constexpr uint32_t rightButton = 1u << uint32_t(Input::MouseButton::Right);
+        return (mViewportMouseButtons & rightButton) != 0 && mpScene && mpScene->getCameraControlsEnabled() &&
+            mpScene->getCameraControllerType() == Scene::CameraControllerType::Editor;
     }
 
     bool Renderer::onMouseEvent(const MouseEvent& mouseEvent)
@@ -769,8 +816,27 @@ namespace Mogwai
             if (pe->mouseEvent(mouseEvent)) return true;
         }
 
-        if (mGraphs.size()) mGraphs[mActiveGraph].pGraph->onMouseEvent(mouseEvent);
-        return mpScene ? mpScene->onMouseEvent(mouseEvent) : false;
+        MouseEvent renderEvent = mouseEvent;
+        if (mpRenderFbo)
+        {
+            const auto& pFbo = getTargetFbo();
+            const float side = float(getControlPanelRect().x);
+            const float2 position = mouseEvent.pos * float2(pFbo->getWidth(), pFbo->getHeight());
+            const bool inside = all(position >= float2(0.f)) && all(position < float2(side));
+            if (!inside && (!mViewportMouseButtons || mouseEvent.type == MouseEvent::Type::ButtonDown))
+                return false;
+
+            // Continue a drag started in the image until its button is released.
+            if (mouseEvent.type == MouseEvent::Type::ButtonDown)
+                mViewportMouseButtons |= 1u << uint32_t(mouseEvent.button);
+            if (mouseEvent.type == MouseEvent::Type::ButtonUp)
+                mViewportMouseButtons &= ~(1u << uint32_t(mouseEvent.button));
+            renderEvent.pos = position / side;
+            renderEvent.screenPos = renderEvent.pos * float(kRenderSize);
+        }
+
+        if (mGraphs.size()) mGraphs[mActiveGraph].pGraph->onMouseEvent(renderEvent);
+        return mpScene ? mpScene->onMouseEvent(renderEvent) : false;
     }
 
     bool Renderer::onKeyEvent(const KeyboardEvent& keyEvent)
@@ -807,6 +873,8 @@ namespace Mogwai
 
     void Renderer::onResize(uint32_t width, uint32_t height)
     {
+        if (mpRenderFbo) return;
+
         for (auto& g : mGraphs)
         {
             g.pGraph->onResize(getTargetFbo().get());
@@ -877,6 +945,9 @@ int runMain(int argc, char** argv)
     args::Flag deferredFlag(parser, "deferred", "The script is loaded deferred.", {"deferred"});
     args::ValueFlag<std::string> sceneFlag(parser, "path", "Scene file (for example, a .pyscene file) to open.", { 'S', "scene" });
     args::ValueFlag<std::string> shaderCacheFlag(parser, "shadercache", "Path to the GFX shader cache.", { "shadercache" });
+    args::ValueFlag<std::string> shaderDatabaseFlag(
+        parser, "path", "Export runtime shader compiler inputs to a JSON compilation database.", {"shader-compile-db"}
+    );
     args::ValueFlag<std::string> logfileFlag(parser, "path", "File to write log into.", {'l', "logfile"});
     args::ValueFlag<int32_t> verbosityFlag(parser, "verbosity", "Logging verbosity (0=disabled, 1=fatal errors, 2=errors, 3=warnings, 4=infos, 5=debugging)", { 'v', "verbosity" }, 4);
     args::Flag silentFlag(parser, "", "Start without opening a window and handling user input (deprecated: use --headless).", {"silent"});
@@ -972,6 +1043,8 @@ int runMain(int argc, char** argv)
         config.headless = true;
     if (shaderCacheFlag)
         config.deviceDesc.shaderCachePath = args::get(shaderCacheFlag);
+    if (shaderDatabaseFlag)
+        config.shaderCompilationDatabase = args::get(shaderDatabaseFlag);
     if (enableDebugLayerFlag)
         config.deviceDesc.enableDebugLayer = true;
     if (generateShaderDebugInfoFlag)
@@ -982,6 +1055,12 @@ int runMain(int argc, char** argv)
         config.deviceDesc.enableRaytracingValidation = true;
 
     config.windowDesc.title = "Mogwai";
+    config.windowDesc.centerOnStart = true;
+    if (!config.headless && !silentFlag)
+    {
+        config.windowDesc.width = Mogwai::Renderer::kRenderSize + Mogwai::Renderer::kControlPanelWidth;
+        config.windowDesc.height = Mogwai::Renderer::kRenderSize;
+    }
     if (widthFlag)
         config.windowDesc.width = args::get(widthFlag);
     if (heightFlag)

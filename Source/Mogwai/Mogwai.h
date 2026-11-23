@@ -124,6 +124,10 @@ namespace Mogwai
 
         RenderGraph* getActiveGraph() const;
 
+        static constexpr uint32_t kRenderSize = 1080;
+        static constexpr uint32_t kControlPanelWidth = 512;
+        uint4 getControlPanelRect() const;
+
         uint32_t getActiveGraphIndex() const { return mActiveGraph; }
 
         KeyCallback getKeyCallback() const { return mKeyCallback; }
@@ -223,6 +227,12 @@ namespace Mogwai
         void registerScriptBindings(pybind11::module& m);
 
         void handleGamepadInput(float deltaTimeSeconds);
+
+    private:
+        bool hasInputCapture() const override;
+        const ref<Fbo>& getRenderFbo() const { return mpRenderFbo ? mpRenderFbo : getTargetFbo(); }
+        ref<Fbo> mpRenderFbo;
+        uint32_t mViewportMouseButtons = 0;
     };
 
 #define MOGWAI_EXTENSION(Name)                         \
