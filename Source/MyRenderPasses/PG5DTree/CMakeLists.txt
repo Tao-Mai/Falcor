@@ -1,5 +1,7 @@
 add_plugin(PG5DTree)
 
+target_link_libraries(PG5DTree PRIVATE MyRenderPassesShared)
+
 target_sources(PG5DTree PRIVATE
     PG5DTree.cpp
     PG5DTree.h

@@ -28,7 +28,11 @@
 #include "Falcor.h"
 #include "AppData.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <array>
 #include <fstream>
+#include <set>
+#include <string_view>
 
 using json = nlohmann::json;
 
@@ -41,7 +45,9 @@ namespace Mogwai
         const char kRecentScripts[] = "recentScripts";
         const char kRecentScenes[] = "recentScenes";
 
-        size_t kMaxRecentFiles = 25;
+        constexpr size_t kMaxRecentFiles = 25;
+        // Scene files scanned in the project resources. Standalone models can be loaded explicitly.
+        constexpr std::array<std::string_view, 7> kSceneExtensions = {"pyscene", "pbrt", "xml", "usd", "usda", "usdc", "usdz"};
     }
 
     AppData::AppData(const std::filesystem::path& path)
@@ -53,34 +59,67 @@ namespace Mogwai
         loadFromFile(mPath);
     }
 
+    std::vector<std::filesystem::path> AppData::getRecentScenes() const
+    {
+        return {mRecentScenes.begin(), mRecentScenes.begin() + std::min(mRecentScenes.size(), kMaxRecentFiles)};
+    }
+
+    std::vector<std::filesystem::path> AppData::getAvailableScenes(const std::filesystem::path& resourceDirectory) const
+    {
+        namespace fs = std::filesystem;
+        std::set<fs::path> scenes;
+        const auto& filters = Scene::getFileExtensionFilters();
+        const auto addScene = [&](const fs::path& path, const std::string& extension)
+        {
+            if (std::none_of(filters.begin(), filters.end(), [&](const auto& filter) { return filter.ext == extension; })) return;
+
+            std::error_code error;
+            auto canonicalPath = fs::canonical(path, error);
+            if (!error && fs::is_regular_file(canonicalPath, error)) scenes.insert(std::move(canonicalPath));
+        };
+
+        for (const auto& path : mRecentScenes) addScene(path, getExtensionFromPath(path));
+
+        std::error_code error;
+        fs::recursive_directory_iterator entry(resourceDirectory, fs::directory_options::skip_permission_denied, error);
+        for (const fs::recursive_directory_iterator end; !error && entry != end; entry.increment(error))
+        {
+            const auto extension = getExtensionFromPath(entry->path());
+            if (std::find(kSceneExtensions.begin(), kSceneExtensions.end(), extension) != kSceneExtensions.end())
+                addScene(entry->path(), extension);
+        }
+
+        return {scenes.begin(), scenes.end()};
+    }
+
     void AppData::addRecentScript(const std::filesystem::path& path)
     {
-        addRecentPath(mRecentScripts, path);
+        addRecentPath(mRecentScripts, path, kMaxRecentFiles);
     }
 
     void AppData::addRecentScene(const std::filesystem::path& path)
     {
-        addRecentPath(mRecentScenes, path);
+        addRecentPath(mRecentScenes, path, mRecentScenes.max_size());
     }
 
-    void AppData::addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path)
+    void AppData::addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path, size_t limit)
     {
-        if (!std::filesystem::exists(path)) return;
-        std::filesystem::path fullPath = std::filesystem::canonical(path);
+        std::error_code error;
+        const auto fullPath = std::filesystem::canonical(path, error);
+        if (error || (!paths.empty() && paths.front() == fullPath)) return;
+
         paths.erase(std::remove(paths.begin(), paths.end(), fullPath), paths.end());
         paths.insert(paths.begin(), fullPath);
-        if (paths.size() > kMaxRecentFiles) paths.resize(kMaxRecentFiles);
+        if (paths.size() > limit) paths.resize(limit);
         save();
     }
 
     void AppData::removeNonExistingPaths(std::vector<std::filesystem::path>& paths)
     {
         paths.erase(std::remove_if(paths.begin(), paths.end(), [](const auto& path) {
-            // Remove path if file does not exist.
-            if (!std::filesystem::exists(path)) return true;
-            auto canonicalPath = std::filesystem::canonical(path);
-            // Remove path if not in canonical form.
-            return path != canonicalPath;
+            std::error_code error;
+            auto canonicalPath = std::filesystem::canonical(path, error);
+            return error || path != canonicalPath;
         }), paths.end());
     }
 
@@ -98,7 +137,7 @@ namespace Mogwai
         {
             std::vector<std::string> strings = j.get<std::vector<std::string>>();
             std::vector<std::filesystem::path> paths;
-            std::transform(strings.begin(), strings.end(), std::back_inserter(paths), [](const std::string& str) { return str; });
+            for (const auto& str : strings) paths.push_back(std::filesystem::u8path(str));
             return paths;
         };
 
@@ -122,7 +161,11 @@ namespace Mogwai
         auto getPathArray = [](const std::vector<std::filesystem::path>& paths)
         {
             std::vector<std::string> strings;
-            std::transform(paths.begin(), paths.end(), std::back_inserter(strings), [](const std::filesystem::path& path) { return path.string(); });
+            for (const auto& path : paths)
+            {
+                const auto utf8 = path.u8string();
+                strings.emplace_back(utf8.begin(), utf8.end());
+            }
             return json(strings);
         };
 

@@ -52,6 +52,7 @@
 
 #if FALCOR_HAS_D3D12
 #include "Core/API/Shared/D3D12DescriptorPool.h"
+#include <dxgi1_2.h>
 #endif
 
 #if FALCOR_NVAPI_AVAILABLE
@@ -61,6 +62,8 @@
 
 
 #include <algorithm>
+#include <cstring>
+#include <optional>
 namespace Falcor
 {
 static_assert(sizeof(AdapterLUID) == sizeof(gfx::AdapterLUID));
@@ -428,6 +431,38 @@ inline ShaderModel querySupportedShaderModel(gfx::IDevice* pDevice)
     return ShaderModel::Unknown;
 }
 
+#if FALCOR_WINDOWS && FALCOR_HAS_D3D12
+static std::optional<AdapterLUID> findOnlyNvidiaAdapter()
+{
+    Slang::ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.writeRef()))))
+        return {};
+
+    std::optional<AdapterLUID> result;
+    for (UINT index = 0;; ++index)
+    {
+        Slang::ComPtr<IDXGIAdapter1> adapter;
+        const HRESULT status = factory->EnumAdapters1(index, adapter.writeRef());
+        if (status == DXGI_ERROR_NOT_FOUND)
+            return result;
+        if (FAILED(status))
+            return {};
+
+        DXGI_ADAPTER_DESC1 desc = {};
+        if (FAILED(adapter->GetDesc1(&desc)))
+            return {};
+        if (desc.VendorId != 0x10de || (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE))
+            continue;
+        if (result)
+            return {};
+
+        result.emplace();
+        static_assert(sizeof(desc.AdapterLuid) == 8);
+        std::memcpy(&result->luid, &desc.AdapterLuid, sizeof(desc.AdapterLuid));
+    }
+}
+#endif
+
 Device::Device(const Desc& desc) : mDesc(desc)
 {
     if (mDesc.enableAftermath)
@@ -504,31 +539,45 @@ Device::Device(const Desc& desc) : mDesc(desc)
     gfxDesc.extendedDescs = extendedDescs.data();
 
 #if FALCOR_NVAPI_AVAILABLE
-    mpAPIDispatcher.reset(new PipelineCreationAPIDispatcher());
-    gfxDesc.apiCommandDispatcher = static_cast<ISlangUnknown*>(mpAPIDispatcher.get());
+    if (mDesc.type == Type::D3D12)
+    {
+        mpAPIDispatcher.reset(new PipelineCreationAPIDispatcher());
+        gfxDesc.apiCommandDispatcher = static_cast<ISlangUnknown*>(mpAPIDispatcher.get());
+    }
 #endif
 
     // Setup debug layer.
     FALCOR_GFX_CALL(gfxSetDebugCallback(&gGFXDebugCallBack));
     gfx::gfxEnableDebugLayer(mDesc.enableDebugLayer);
 
-    // Get list of available GPUs.
-    const auto gpus = getGPUs(mDesc.type);
-
-    if (gpus.size() == 0)
+    AdapterLUID adapterLuid = {};
+#if FALCOR_WINDOWS && FALCOR_HAS_D3D12
+    // The default device prefers NVIDIA adapters. With one unambiguous choice,
+    // GFX can check its Vulkan support while creating the actual device.
+    if (mDesc.type == Type::Vulkan && mDesc.gpu == 0 && !mDesc.shaderModuleCachePath.empty())
     {
-        FALCOR_THROW("Did not find any GPUs for device type '{}'.", enumToString<decltype(mDesc.type)>(mDesc.type));
+        if (const auto candidate = findOnlyNvidiaAdapter())
+        {
+            adapterLuid = *candidate;
+            gfxDesc.adapterLUID = reinterpret_cast<const gfx::AdapterLUID*>(&adapterLuid);
+            gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef());
+        }
     }
+#endif
 
-    if (mDesc.gpu >= gpus.size())
+    if (!mGfxDevice)
     {
-        logWarning("GPU index {} is out of range, using first GPU instead.", mDesc.gpu);
-        mDesc.gpu = 0;
-    }
+        const auto gpus = getGPUs(mDesc.type);
+        if (gpus.empty())
+            FALCOR_THROW("Did not find any GPUs for device type '{}'.", enumToString<decltype(mDesc.type)>(mDesc.type));
+        if (mDesc.gpu >= gpus.size())
+        {
+            logWarning("GPU index {} is out of range, using first GPU instead.", mDesc.gpu);
+            mDesc.gpu = 0;
+        }
 
-    // Try to create device on specific GPU.
-    {
-        gfxDesc.adapterLUID = reinterpret_cast<const gfx::AdapterLUID*>(&gpus[mDesc.gpu].luid);
+        adapterLuid = gpus[mDesc.gpu].luid;
+        gfxDesc.adapterLUID = reinterpret_cast<const gfx::AdapterLUID*>(&adapterLuid);
         if (SLANG_FAILED(gfxCreateDevice(&gfxDesc, mGfxDevice.writeRef())))
             logWarning("Failed to create device on GPU {} ({}).", mDesc.gpu, gpus[mDesc.gpu].name);
     }
@@ -543,7 +592,7 @@ Device::Device(const Desc& desc) : mDesc(desc)
 
     const auto& deviceInfo = mGfxDevice->getDeviceInfo();
     mInfo.adapterName = deviceInfo.adapterName;
-    mInfo.adapterLUID = gfxDesc.adapterLUID ? gpus[mDesc.gpu].luid : AdapterLUID();
+    mInfo.adapterLUID = gfxDesc.adapterLUID ? adapterLuid : AdapterLUID();
     mInfo.apiName = deviceInfo.apiName;
     mLimits = queryLimits(mGfxDevice);
     mSupportedFeatures = querySupportedFeatures(mGfxDevice);

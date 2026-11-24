@@ -7,7 +7,8 @@ camera = Camera("Cornell Box Camera")
 camera.position = float3(-277.2, 274.4, 1000.0)
 camera.target = float3(-277.2, 274.4, -279.6)
 camera.up = float3(0.0, 1.0, 0.0)
-camera.focalLength = 40.0
+# 方形画幅的四边落在开口内，填满渲染区。
+camera.focalLength = 44.0
 camera.nearPlane = 1.0
 camera.farPlane = 5000.0
 sceneBuilder.addCamera(camera)

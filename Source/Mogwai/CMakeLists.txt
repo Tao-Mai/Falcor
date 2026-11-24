@@ -8,6 +8,8 @@ target_sources(Mogwai PRIVATE
     MogwaiScripting.cpp
     MogwaiSettings.cpp
     MogwaiSettings.h
+    StartupShaderCache.cpp
+    StartupShaderCache.h
 
     Extensions/Capture/CaptureTrigger.cpp
     Extensions/Capture/CaptureTrigger.h

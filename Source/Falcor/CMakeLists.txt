@@ -142,6 +142,8 @@ target_sources(Falcor PRIVATE
     Core/Program/ProgramVars.h
     Core/Program/ProgramVersion.cpp
     Core/Program/ProgramVersion.h
+    Core/Program/ShaderModuleCache.cpp
+    Core/Program/ShaderModuleCache.h
     Core/Program/RtBindingTable.cpp
     Core/Program/RtBindingTable.h
     Core/Program/ShaderVar.cpp

@@ -1,7 +1,9 @@
 from falcor import RenderGraph
 
 
-def render_graph_PathReuseTarget(samples_per_pixel=16, max_surface_bounces=6, sample_pattern="Stratified"):
+def render_graph_PathReuseTarget(
+    samples_per_pixel=16, max_surface_bounces=6, sample_pattern="Stratified", *, enable_accumulation=False
+):
     graph = RenderGraph("PathReuseTarget")
     graph.create_pass(
         "VBufferRT", "VBufferRT", {"samplePattern": sample_pattern, "sampleCount": 16, "adjustShadingNormals": False}
@@ -21,7 +23,9 @@ def render_graph_PathReuseTarget(samples_per_pixel=16, max_surface_bounces=6, sa
             "colorFormat": "RGBA32F",
         },
     )
-    graph.create_pass("AccumulatePass", "AccumulatePass", {"enabled": True, "precisionMode": "SingleCompensated"})
+    graph.create_pass(
+        "AccumulatePass", "AccumulatePass", {"enabled": enable_accumulation, "precisionMode": "SingleCompensated"}
+    )
     graph.create_pass("ToneMapper", "ToneMapper", {"autoExposure": False, "exposureCompensation": 0.0})
     graph.add_edge("VBufferRT.vbuffer", "PathTracer.vbuffer")
     graph.add_edge("VBufferRT.viewW", "PathTracer.viewW")

@@ -27,6 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "Mogwai.h"
+#include <optional>
 
 namespace Mogwai
 {
@@ -49,6 +50,7 @@ namespace Mogwai
 
         void renderMainMenu(Gui* pGui);
         void renderOverlay(Gui* pGui);
+        void renderScenes();
         void renderGraphs(Gui::Window& w);
         void renderTimeSettings(Gui::Window& w);
         void renderWindowSettings(Gui::Window& w);
@@ -62,6 +64,7 @@ namespace Mogwai
         bool mShowConsole = false;
         bool mShowTime = false;
         bool mShowWinSize = false;
+        std::optional<std::vector<std::filesystem::path>> mAvailableScenes;
         uint2 mMousePosition;
     };
 }

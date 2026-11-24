@@ -1,0 +1,20 @@
+{
+  "scripts/my_graph/analyze_significance_cache.py": "1057c09e6b44086ce0634531b76c2f96c5c9d61da877b05c460fda26d4a87e66",
+  "scripts/my_graph/benchmark_significance_cache.py": "f34816b1255254f179fa173704c62257ab70745974e90fffa04005cec69fbe11",
+  "scripts/my_graph/path_reuse.py": "a7df7cb2c45f2243a429ab19e631c6f733c7697cc3da44b2a57440b09a4664f7",
+  "scripts/my_graph/scenes/SignificanceCacheFocused.pyscene": "d03c1e3ebdaff3f4a2c4d16df966f2a781d88c211cdccd81d6e565c4fcf0a80c",
+  "scripts/my_graph/scenes/SignificanceCacheIndirect.pyscene": "b88f800db1993bee996d63d2831b138dca8ef42f693173063748612a14df3468",
+  "scripts/my_graph/validate_significance_cache.py": "868e318d6e5cf94b40a54d3634b7eb687fb95defa5e0b3f5c9fd43e1818979ee",
+  "scripts/my_graph/validate_significance_cache_lobes.py": "1fa3d2ec9731d0fcc713d46153404841514de587572de7621ad85ebf8c5e0739",
+  "scripts/SignificanceCache.py": "135c0a2e2726b70c5df62350fac41514f09fdee2b2c6957dcc7274209f02ecb2",
+  "Source/MyRenderPasses/SignificanceCache/CacheGuide.slang": "4acaefbbdcf2620fe1a38672948eb5f8184859c52f319fbe94d3a54677017f8b",
+  "Source/MyRenderPasses/SignificanceCache/CacheTypes.slang": "99654f4ecedbc9521118994fe2aec3e6667b05be2adef6beb2dd1cf24525d683",
+  "Source/MyRenderPasses/SignificanceCache/CMakeLists.txt": "7755120a7c51f8d2b700c188ac6cbd345d3343fef15e6006eb1fc1125feb197b",
+  "Source/MyRenderPasses/SignificanceCache/CosineLobe.slang": "ce6f4a89f8930f09eaf525336c40d51ccf554db2660eca5dc13b1b35d0c8e55e",
+  "Source/MyRenderPasses/SignificanceCache/SignificanceCache.cpp": "9c63798443f072390eb93797b61d2070463c3e483f1ab8879ac78818b3f2a888",
+  "Source/MyRenderPasses/SignificanceCache/SignificanceCache.cs.slang": "21406daa76afae09784d60186df6d40c1e70b4553eb97b1d8beefd70f92122a6",
+  "Source/MyRenderPasses/SignificanceCache/SignificanceCache.h": "acf4ed29ada881b15e45363875e38fd9c28374e258f5cf9d941a403e008d0359",
+  "Source/MyRenderPasses/SignificanceCache/SurfaceTracing.slang": "e5ee816004a683b49ffebf12e15687d3d932d93c196f7dff41cf59b505b51b5f",
+  "Source/MyRenderPasses/SignificanceCache/Tests/Lobes.cs.slang": "1c1c73bfa315c0e83eaf7290848783a59f79d17c9a588a9bd3162c98ca838757",
+  "Source/MyRenderPasses/SignificanceCache/UpdateCache.cs.slang": "9d9c0968b3754eaeb95b6b35c22149c44ffde07fcde6570b72f47d10d7e4997f"
+}

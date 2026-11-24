@@ -54,7 +54,7 @@ def prepare(renderer, graph):
 
 
 def render_reference(renderer, bounces):
-    graph = render_graph_PathReuseTarget(TARGET_SPP_PER_FRAME, bounces, "Center")
+    graph = render_graph_PathReuseTarget(TARGET_SPP_PER_FRAME, bounces, "Center", enable_accumulation=True)
     graph.unmark_output("ToneMapper.dst")
     graph.mark_output(OUTPUT)
     accumulation = prepare(renderer, graph)

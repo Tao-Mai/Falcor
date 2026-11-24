@@ -33,6 +33,7 @@
 #include "Utils/Scripting/ScriptBindings.h"
 
 #include <slang.h>
+#include <slang-tag-version.h>
 
 #include <map>
 
@@ -174,12 +175,14 @@ struct ExtendedReflectionPath : ReflectionPath
             primaryLinkStorage.pVar = pVar;
             pPrimary = &primaryLinkStorage;
 
+#ifndef SLANG_VERSION_NUMERIC
             if (auto pDeferredVar = pVar->getPendingDataLayout())
             {
                 deferredLinkStorage.pParent = pDeferred;
                 deferredLinkStorage.pVar = pDeferredVar;
                 pDeferred = &deferredLinkStorage;
             }
+#endif
         }
     }
 
@@ -956,6 +959,8 @@ ref<ReflectionType> reflectInterfaceType(
 
     bindingInfo.flavor = ParameterBlockReflection::ResourceRangeBindingInfo::Flavor::Interface;
 
+    // Slang's current reflection API exposes the binding layout directly.
+#ifndef SLANG_VERSION_NUMERIC
     if (auto pSlangPendingTypeLayout = pSlangType->getPendingDataTypeLayout())
     {
         ReflectionPath subPath;
@@ -978,6 +983,7 @@ ref<ReflectionType> reflectInterfaceType(
         bindingInfo.regIndex = (uint32_t)getRegisterIndexFromPath(pPath->pDeferred, SlangParameterCategory(category));
         bindingInfo.regSpace = getRegisterSpaceFromPath(pPath->pPrimary, SlangParameterCategory(category));
     }
+#endif
 
     if (pBlock)
     {
@@ -996,6 +1002,9 @@ ref<ReflectionType> reflectSpecializedType(
 {
     auto pSlangBaseType = pSlangType->getElementTypeLayout();
 
+#ifdef SLANG_VERSION_NUMERIC
+    return reflectType(pSlangBaseType, pBlock, pPath, pProgramVersion);
+#else
     auto pSlangVarLayout = pSlangType->getSpecializedTypePendingDataVarLayout();
 
     ReflectionPathLink deferredLink;
@@ -1007,6 +1016,7 @@ ref<ReflectionType> reflectSpecializedType(
     path.pDeferred = &deferredLink;
 
     return reflectType(pSlangBaseType, pBlock, &path, pProgramVersion);
+#endif
 }
 
 ref<ReflectionType> reflectType(

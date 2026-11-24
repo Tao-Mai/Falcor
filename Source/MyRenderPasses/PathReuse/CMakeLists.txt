@@ -1,5 +1,7 @@
 add_plugin(PathReuse)
 
+target_link_libraries(PathReuse PRIVATE MyRenderPassesShared)
+
 target_sources(PathReuse PRIVATE
     PathReuse.cpp
     PathReuse.h

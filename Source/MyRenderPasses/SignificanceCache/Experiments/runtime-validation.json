@@ -1,0 +1,23 @@
+{
+  "registered_graphs": [
+    "PathReuse",
+    "MyPathTracer",
+    "PG5DTree",
+    "PhotonMapPathTracer",
+    "SignificanceCache"
+  ],
+  "no_scene_clear": true,
+  "warmup_and_snapshot": true,
+  "seed_reset": true,
+  "grid_resize": true,
+  "neighbor_search": true,
+  "query_lobe_count": true,
+  "emissive_intensity": true,
+  "render_settings": true,
+  "render_settings_restore": true,
+  "camera_preserves_cache": true,
+  "invalid_properties_rejected": true,
+  "zero_bounce_bypass": true,
+  "maximum_capacity_and_zero_warmup": true,
+  "graph_switch": true
+}

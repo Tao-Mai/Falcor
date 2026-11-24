@@ -162,6 +162,7 @@ namespace Mogwai
         };
 
         ref<Scene> mpScene;
+        std::filesystem::path mScenePath;
         sigs::Connection                mUpdateFlagsConnection; ///< Connection to the UpdateFlags signal.
         /// SceneUpdateFlags accumulated since last `beginFrame()`
         IScene::UpdateFlags             mUpdateFlags = IScene::UpdateFlags::None;
@@ -233,6 +234,9 @@ namespace Mogwai
         const ref<Fbo>& getRenderFbo() const { return mpRenderFbo ? mpRenderFbo : getTargetFbo(); }
         ref<Fbo> mpRenderFbo;
         uint32_t mViewportMouseButtons = 0;
+#if FALCOR_WINDOWS
+        uint32_t mWindowFrames = 0;
+#endif
     };
 
 #define MOGWAI_EXTENSION(Name)                         \

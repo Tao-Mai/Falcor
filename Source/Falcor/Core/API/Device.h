@@ -148,6 +148,9 @@ public:
         /// The full path to the root directory for the shader cache. An empty string will disable the cache.
         std::string shaderCachePath = (getRuntimeDirectory() / ".shadercache").string();
 
+        /// Directory for serialized Slang imports. An empty path uses source compilation.
+        std::filesystem::path shaderModuleCachePath;
+
 #if FALCOR_HAS_D3D12
         /// GUID list for experimental features
         std::vector<GUID> experimentalFeatures;

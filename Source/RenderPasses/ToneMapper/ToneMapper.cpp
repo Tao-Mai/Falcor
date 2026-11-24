@@ -117,9 +117,6 @@ ToneMapper::ToneMapper(ref<Device> pDevice, const Properties& props) : RenderPas
 {
     parseProperties(props);
 
-    createLuminancePass();
-    createToneMapPass();
-
     updateWhiteBalanceTransform();
 
     Sampler::Desc samplerDesc;
@@ -227,6 +224,9 @@ void ToneMapper::execute(RenderContext* pRenderContext, const RenderData& render
     // Run luminance pass if auto exposure is enabled
     if (mAutoExposure)
     {
+        if (!mpLuminancePass)
+            createLuminancePass();
+
         createLuminanceFbo(pSrc);
 
         auto var = mpLuminancePass->getRootVar();

@@ -32,26 +32,41 @@
 #endif
 #include <windows.h>
 #include <CommCtrl.h>
-#include <random>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 namespace Falcor
 {
 struct ProgressBar::Window
 {
-    bool running;
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool running = true;
+    std::optional<std::string> pendingMessage;
     std::thread thread;
 
-    Window(const std::string& msg)
-    {
-        running = true;
-        thread = std::thread(threadFunc, this, msg);
-    }
+    Window(const std::string& msg) : thread(threadFunc, this, msg) {}
 
     ~Window()
     {
-        running = false;
+        {
+            std::lock_guard lock(mutex);
+            running = false;
+        }
+        changed.notify_one();
         thread.join();
+    }
+
+    void setMessage(const std::string& message)
+    {
+        {
+            std::lock_guard lock(mutex);
+            pendingMessage = message;
+        }
+        changed.notify_one();
     }
 
     static void threadFunc(ProgressBar::Window* pThis, std::string msgText)
@@ -70,11 +85,23 @@ struct ProgressBar::Window
         setWindowIcon(getRuntimeDirectory() / "data/framework/nvidia.ico", hwnd);
 
         // Execute
-        while (pThis->running)
+        while (true)
         {
+            std::optional<std::string> message;
+            {
+                std::unique_lock lock(pThis->mutex);
+                pThis->changed.wait_for(lock, std::chrono::milliseconds(50), [pThis] {
+                    return !pThis->running || pThis->pendingMessage.has_value();
+                });
+                if (!pThis->running)
+                    break;
+                message.swap(pThis->pendingMessage);
+            }
+
+            if (message)
+                SetWindowTextA(hwnd, message->c_str());
             SendMessage(hwnd, PBM_STEPIT, 0, 0);
             SendMessage(hwnd, WM_PAINT, 0, 0);
-            Sleep(50);
             MSG msg;
             while (PeekMessage(&msg, hwnd, 0, 0, PM_REMOVE))
             {
@@ -103,8 +130,10 @@ ProgressBar::~ProgressBar()
 
 void ProgressBar::show(const std::string& msg)
 {
-    close();
-    mpWindow = std::make_unique<Window>(msg);
+    if (mpWindow)
+        mpWindow->setMessage(msg);
+    else
+        mpWindow = std::make_unique<Window>(msg);
 }
 
 void ProgressBar::close()

@@ -26,11 +26,14 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ProgramManager.h"
+#include "ShaderModuleCache.h"
 #include "Core/API/Device.h"
 #include "Core/Platform/OS.h"
+#include "Utils/CryptoUtils.h"
 #include "Utils/Logger.h"
 #include "Utils/Timing/CpuTimer.h"
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
 #include <slang.h>
 #include <algorithm>
@@ -112,6 +115,10 @@ static std::string shaderPathToUtf8(const std::filesystem::path& path)
     return {utf8.begin(), utf8.end()};
 }
 
+namespace fs = std::filesystem;
+using nlohmann::json;
+using ShaderModuleCache::SlangRequest;
+
 struct ProgramManager::ShaderCompilationDatabase
 {
     explicit ShaderCompilationDatabase(std::filesystem::path path) : mPath(std::move(path)) {}
@@ -183,17 +190,38 @@ ref<const ProgramVersion> ProgramManager::createProgramVersion(const Program& pr
     CpuTimer timer;
     timer.update();
 
-    auto pSlangRequest = createSlangCompileRequest(program);
-    if (pSlangRequest == nullptr)
-        return nullptr;
-
-    SlangResult slangResult = spCompile(pSlangRequest);
-    log += spGetDiagnosticOutput(pSlangRequest);
-    if (SLANG_FAILED(slangResult))
+    std::filesystem::path moduleCachePath;
+    SlangRequest request;
+    request.attach(createSlangCompileRequest(program, moduleCachePath));
+    auto preloaded = ShaderModuleCache::takeShaderPreload(moduleCachePath);
+    if (preloaded && preloaded->request)
     {
-        spDestroyCompileRequest(pSlangRequest);
-        return nullptr;
+        request = std::move(preloaded->request);
+        program.mFileTimeMap = std::move(preloaded->dependencyTimes);
+        log += request->getDiagnosticOutput();
     }
+    else
+    {
+        if (preloaded)
+            request.attach(createSlangCompileRequest(program, moduleCachePath));
+        if (!request)
+            return nullptr;
+
+        const SlangResult result = request->compile();
+        log += request->getDiagnosticOutput();
+        if (SLANG_FAILED(result))
+            return nullptr;
+
+        if (ShaderModuleCache::storeShaderModules(request, moduleCachePath))
+        {
+            // Warm the GFX cache with the same linked code hashes used after a restart.
+            if (auto replay = ShaderModuleCache::replayShaderModules(moduleCachePath))
+                request = std::move(replay);
+        }
+        program.mFileTimeMap = ShaderModuleCache::getShaderDependencyTimes(request);
+    }
+
+    auto pSlangRequest = request.get();
 
     Slang::ComPtr<slang::IComponentType> pSlangGlobalScope;
     spCompileRequest_getProgram(pSlangRequest, pSlangGlobalScope.writeRef());
@@ -223,15 +251,6 @@ ref<const ProgramVersion> ProgramManager::createProgramVersion(const Program& pr
                 pSlangEntryPoints.push_back(pSlangEntryPoint);
             }
         }
-    }
-
-    // Extract list of files referenced, for dependency-tracking purposes.
-    int depFileCount = spGetDependencyFileCount(pSlangRequest);
-    for (int ii = 0; ii < depFileCount; ++ii)
-    {
-        std::string depFilePath = spGetDependencyFilePath(pSlangRequest, ii);
-        if (std::filesystem::exists(depFilePath))
-            program.mFileTimeMap[depFilePath] = getFileModifiedTime(depFilePath);
     }
 
     // Note: the `ProgramReflection` needs to be able to refer back to the
@@ -699,7 +718,7 @@ void ProgramManager::setShaderCompilationDatabase(const std::filesystem::path& p
     mpShaderCompilationDatabase = std::make_unique<ShaderCompilationDatabase>(std::move(absolutePath));
 }
 
-SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& program) const
+SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& program, std::filesystem::path& moduleCachePath) const
 {
     slang::IGlobalSession* pSlangGlobalSession = mpDevice->getSlangGlobalSession();
     FALCOR_ASSERT(pSlangGlobalSession);
@@ -841,8 +860,88 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
     sessionDesc.compilerOptionEntries = compilerOptionEntries.data();
     sessionDesc.compilerOptionEntryCount = (uint32_t)compilerOptionEntries.size();
 
+    const bool dumpIR = is_set(program.mDesc.compilerFlags, SlangCompilerFlags::DumpIntermediates);
+    const bool debugInfo = mGenerateDebugInfo || is_set(program.mDesc.compilerFlags, SlangCompilerFlags::GenerateDebugInfo);
+    const auto& moduleCacheDirectory = mpDevice->getDesc().shaderModuleCachePath;
+    bool cacheable = !moduleCacheDirectory.empty() && ShaderModuleCache::supportsShaderModuleCache() && !dumpIR && !debugInfo &&
+                     !is_set(compilerFlags, SlangCompilerFlags::TreatWarningsAsErrors) &&
+                     mGlobalCompilerArguments.empty() && program.mDesc.compilerArguments.empty();
+
+    std::vector<std::string> compilerArguments = mGlobalCompilerArguments;
+    compilerArguments.insert(compilerArguments.end(), program.mDesc.compilerArguments.begin(), program.mDesc.compilerArguments.end());
+#if FALCOR_NVAPI_AVAILABLE
+    compilerArguments.push_back("-Xdxc");
+    compilerArguments.push_back("-I" + (getRuntimeDirectory() / "shaders/nvapi").string());
+#endif
+
+    std::vector<std::filesystem::path> resolvedSources;
+    json cacheModules = json::array();
+    for (const auto& module : program.mDesc.shaderModules)
+    {
+        json files = json::array();
+        for (const auto& source : module.sources)
+        {
+            if (source.type != ProgramDesc::ShaderSource::Type::File)
+            {
+                cacheable = false;
+                continue;
+            }
+
+            std::filesystem::path fullPath;
+            if (!findFileInShaderDirectories(source.path, fullPath))
+                FALCOR_THROW("Can't find shader file {}", source.path);
+
+            if (cacheable)
+                files.push_back(fullPath.string());
+            resolvedSources.push_back(std::move(fullPath));
+        }
+        if (cacheable)
+            cacheModules.push_back({module.name, std::move(files)});
+    }
+
+    if (cacheable)
+    {
+        json defines = json::array();
+        for (const auto& define : slangDefines)
+            defines.push_back({define.name, define.value});
+        json options = json::array();
+        for (const auto& option : compilerOptionEntries)
+        {
+            if (option.value.kind == slang::CompilerOptionValueKind::String)
+                options.push_back({option.name, option.value.stringValue0});
+            else
+                options.push_back({option.name, option.value.intValue0});
+        }
+        json entryPoints = json::array();
+        for (const auto& group : program.mDesc.entryPointGroups)
+            for (const auto& entry : group.entryPoints)
+                entryPoints.push_back({group.shaderModuleIndex, entry.name, getSlangStage(entry.type)});
+
+        const json recipe = {
+            {"compiler", pSlangGlobalSession->getBuildTagString()},
+            {"target", {{"format", targetDesc.format}, {"profile", profile}, {"floatMode", targetDesc.floatingPointMode},
+                        {"scalarLayout", targetDesc.forceGLSLScalarBufferLayout}}},
+            {"searchPaths", searchPaths}, {"defines", std::move(defines)}, {"options", std::move(options)},
+            {"matrixLayout", sessionDesc.defaultMatrixLayoutMode}, {"arguments", compilerArguments},
+            {"sources", std::move(cacheModules)}, {"entryPoints", std::move(entryPoints)}
+        };
+        SHA1 key;
+        key.update("falcor-slang-modules-2");
+        key.update(recipe.dump());
+        const auto digest = key.finalize();
+        moduleCachePath = moduleCacheDirectory / fmt::format("{:02x}", fmt::join(digest, ""));
+        ShaderModuleCache::writeCompileRecipe(moduleCachePath, recipe);
+    }
+
     Slang::ComPtr<slang::ISession> pSlangSession;
     pSlangGlobalSession->createSession(sessionDesc, pSlangSession.writeRef());
+    if (!ShaderModuleCache::isShaderPreloadScheduled(moduleCachePath) && !ShaderModuleCache::restoreShaderModules(pSlangSession, moduleCachePath))
+    {
+        std::error_code ignored;
+        fs::remove(moduleCachePath, ignored);
+        pSlangGlobalSession->createSession(sessionDesc, pSlangSession.writeRef());
+    }
+
     FALCOR_ASSERT(pSlangSession);
 
     program.mFileTimeMap.clear(); // TODO @skallweit
@@ -852,11 +951,10 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
     FALCOR_ASSERT(pSlangRequest);
 
     // Enable/disable intermediates dump
-    bool dumpIR = is_set(program.mDesc.compilerFlags, SlangCompilerFlags::DumpIntermediates);
     spSetDumpIntermediates(pSlangRequest, dumpIR);
 
     // Set debug level
-    if (mGenerateDebugInfo || is_set(program.mDesc.compilerFlags, SlangCompilerFlags::GenerateDebugInfo))
+    if (debugInfo)
         spSetDebugInfoLevel(pSlangRequest, SLANG_DEBUG_INFO_LEVEL_STANDARD);
 
     // Configure any flags for the Slang compilation step
@@ -870,24 +968,9 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
 
     spSetCompileFlags(pSlangRequest, slangFlags);
 
-    // Set additional command line arguments.
-    {
-        std::vector<const char*> args;
-        for (const auto& arg : mGlobalCompilerArguments)
-            args.push_back(arg.c_str());
-        for (const auto& arg : program.mDesc.compilerArguments)
-            args.push_back(arg.c_str());
-#if FALCOR_NVAPI_AVAILABLE
-        // If NVAPI is available, we need to inform slang/dxc where to find it.
-        std::string nvapiInclude = "-I" + (getRuntimeDirectory() / "shaders/nvapi").string();
-        args.push_back("-Xdxc");
-        args.push_back(nvapiInclude.c_str());
-#endif
-        if (!args.empty())
-            spProcessCommandLineArguments(pSlangRequest, args.data(), (int)args.size());
-    }
+    ShaderModuleCache::setCompileArguments(pSlangRequest, compilerArguments);
 
-    std::vector<std::filesystem::path> resolvedSources;
+    auto resolved = resolvedSources.cbegin();
     for (size_t moduleIndex = 0; moduleIndex < program.mDesc.shaderModules.size(); ++moduleIndex)
     {
         const auto& module = program.mDesc.shaderModules[moduleIndex];
@@ -910,15 +993,7 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
                         "file contains valid shaders"
                     );
                 }
-                std::filesystem::path fullPath;
-                if (!findFileInShaderDirectories(path, fullPath))
-                {
-                    spDestroyCompileRequest(pSlangRequest);
-                    FALCOR_THROW("Can't find shader file {}", path);
-                }
-                spAddTranslationUnitSourceFile(pSlangRequest, translationUnitIndex, fullPath.string().c_str());
-                if (mpShaderCompilationDatabase)
-                    resolvedSources.push_back(std::move(fullPath));
+                spAddTranslationUnitSourceFile(pSlangRequest, translationUnitIndex, (resolved++)->string().c_str());
             }
             else
             {
@@ -942,14 +1017,13 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
         }
     }
 
-    if (!resolvedSources.empty())
+    if (mpShaderCompilationDatabase && !resolvedSources.empty())
     {
         try
         {
-            using nlohmann::json;
             json modules = json::array();
             std::vector<std::string> moduleFiles;
-            auto resolved = resolvedSources.cbegin();
+            resolved = resolvedSources.cbegin();
             for (const auto& module : program.mDesc.shaderModules)
             {
                 json sources = json::array();

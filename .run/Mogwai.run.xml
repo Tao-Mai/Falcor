@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Mogwai" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--device-type vulkan --script=scripts/my_graph/path_reuse.py --scene=resource/CornellBox/CornellBox.pyscene --shader-compile-db &quot;$PROJECT_DIR$/build/clion-release/shader_compile_commands.json&quot;" WORKING_DIR="file://$PROJECT_DIR$" PROJECT_NAME="Falcor" TARGET_NAME="Mogwai" CONFIG_NAME="clion-release - clion-release-build" RUN_TARGET_PROJECT_NAME="Falcor" RUN_TARGET_NAME="Mogwai">
+  <configuration default="false" name="Mogwai" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="--device-type vulkan --use-cache --script=scripts/my_graph/path_reuse.py --scene=resource/CornellBox/CornellBox.pyscene --shader-compile-db &quot;$PROJECT_DIR$/build/clion-release/shader_compile_commands.json&quot;" WORKING_DIR="file://$PROJECT_DIR$" PROJECT_NAME="Falcor" TARGET_NAME="Mogwai" CONFIG_NAME="clion-release - clion-release-build" RUN_TARGET_PROJECT_NAME="Falcor" RUN_TARGET_NAME="Mogwai">
     <envs>
       <env name="FALCOR_DEVMODE" value="1" />
     </envs>

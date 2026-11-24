@@ -38,7 +38,7 @@ import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.EmissiveLightSamplerInterface;
 import Rendering.Lights.EmissiveUniformSampler;
 import Rendering.Lights.LightHelpers;
-import Scene.Material.MaterialTypes;
+import MyRenderPasses.Shared.EmissiveLightHelpers;
 import PathReuseSample;
 
 ConstantBuffer<TracePathsParams> gTraceParams;
@@ -298,20 +298,6 @@ HitInfo traceScatterRay(const Ray ray)
     ScatterPayload payload = {};
     TraceRayScene(RAY_FLAG_NONE, 0xff, kPathReuseScatterRay, kPathReuseScatterRay, ray.toRayDesc(), payload);
     return HitInfo(payload.hit);
-}
-
-bool isMaskedLightSample(const TriangleLightSample light)
-{
-    const uint materialID = gScene.lightCollection.getTriangle(light.triangleIndex).materialID;
-    if (gScene.materials.getMaterialHeader(materialID).getAlphaMode() != AlphaMode::Mask)
-        return false;
-
-    const uint2 meshPrimitive = gScene.lightCollection.getSceneMeshPrimID(light.triangleIndex);
-    GeometryInstanceID instanceID;
-    instanceID.index = meshPrimitive.x;
-    const float3 barycentrics = float3(1.f - light.uv.x - light.uv.y, light.uv);
-    const VertexData vertex = gScene.getVertexData(instanceID, meshPrimitive.y, barycentrics);
-    return gScene.materials.alphaTest(vertex, materialID, 0.f);
 }
 
 struct ScatterSegment

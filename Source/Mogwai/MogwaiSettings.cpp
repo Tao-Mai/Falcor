@@ -38,6 +38,19 @@ namespace Mogwai
 {
     namespace
     {
+        std::string pathToUtf8(const std::filesystem::path& path)
+        {
+            const auto utf8 = path.u8string();
+            return {utf8.begin(), utf8.end()};
+        }
+
+        std::string getSceneLabel(const std::filesystem::path& path)
+        {
+            auto name = path.stem();
+            if (name == "scene" || name == "scene-v4") name = path.parent_path().filename();
+            return pathToUtf8(name);
+        }
+
         void shortcuts()
         {
             constexpr char help[] =
@@ -182,6 +195,36 @@ namespace Mogwai
         mpRenderer->setActiveGraph((curIdx + 1) % mpRenderer->mGraphs.size());
     }
 
+    void MogwaiSettings::renderScenes()
+    {
+        const auto& activePath = mpRenderer->mScenePath;
+        const auto preview = activePath.empty() ? "No scene loaded" : getSceneLabel(activePath);
+        if (!ImGui::BeginCombo("Active Scene", preview.c_str(), ImGuiComboFlags_HeightLarge))
+        {
+            mAvailableScenes.reset();
+            return;
+        }
+
+        if (!mAvailableScenes)
+            mAvailableScenes = mpRenderer->getAppData().getAvailableScenes(getProjectDirectory() / "resource");
+
+        std::filesystem::path selectedPath;
+        if (mAvailableScenes->empty()) ImGui::TextDisabled("No scenes available");
+        for (const auto& path : *mAvailableScenes)
+        {
+            const auto fullPath = pathToUtf8(path);
+            const bool active = path == activePath;
+            ImGui::PushID(fullPath.c_str());
+            if (ImGui::Selectable(getSceneLabel(path).c_str(), active) && !active) selectedPath = path;
+            if (active) ImGui::SetItemDefaultFocus();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fullPath.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+
+        if (!selectedPath.empty()) mpRenderer->loadScene(selectedPath);
+    }
+
     void MogwaiSettings::renderGraphs(Gui::Window& w)
     {
         if (mpRenderer->mGraphs.empty()) return;
@@ -240,10 +283,6 @@ namespace Mogwai
                 mpRenderer->mpScene->renderUI(group);
             }
         }
-        else
-        {
-            w.text("No scene loaded");
-        }
         w.separator();
 
         // Graph UI
@@ -284,12 +323,12 @@ namespace Mogwai
             {
                 auto &appData = mpRenderer->getAppData();
                 auto recentScenes = file.menu("Recent Scenes");
-                for (auto path : appData.getRecentScenes())
+                for (const auto& path : appData.getRecentScenes())
                 {
-                    if (recentScenes.item(path.string()))
+                    if (recentScenes.item(pathToUtf8(path)))
                     {
                         mpRenderer->loadScene(path);
-                        appData.addRecentScene(path);
+                        break;
                     }
                 }
             }
@@ -350,6 +389,7 @@ namespace Mogwai
             }
             if (mShowTime) renderTimeSettings(w);
             if (mShowWinSize) renderWindowSettings(w);
+            renderScenes();
             if (mShowGraphUI) renderGraphs(w);
         }
         mpRenderer->getConsole().render(pGui, mShowConsole);

@@ -1,0 +1,43 @@
+"""向上发光的灯面藏在遮挡板上方，房间主要由顶棚的间接反射照亮。"""
+
+from falcor import *
+
+
+def diffuse(name, rgb):
+    material = StandardMaterial(name)
+    material.baseColor = float4(*rgb, 1)
+    material.roughness = 1
+    return material
+
+
+white = diffuse("White", (0.8, 0.8, 0.8))
+red = diffuse("Red", (0.73, 0.12, 0.08))
+green = diffuse("Green", (0.12, 0.65, 0.17))
+shade = diffuse("Lamp backing", (0.08, 0.08, 0.08))
+lamp = diffuse("Upward emitter", (0, 0, 0))
+lamp.emissiveColor = float3(1, 0.87, 0.68)
+lamp.emissiveFactor = 100
+quad = TriangleMesh.createQuad()
+
+
+def panel(name, material, scale, position, rotation=(0, 0, 0)):
+    transform = Transform(scaling=float3(*scale), translation=float3(*position), rotationEulerDeg=float3(*rotation))
+    node = sceneBuilder.addNode(name, transform)
+    sceneBuilder.addMeshInstance(node, sceneBuilder.addTriangleMesh(quad, material))
+
+
+panel("Floor", white, (2, 1, 2), (0, 0, 0))
+panel("Ceiling", white, (2, 1, 2), (0, 2, 0), (180, 0, 0))
+panel("Back", white, (2, 1, 2), (0, 1, -1), (90, 0, 0))
+panel("Left", red, (2, 1, 2), (-1, 1, 0), (0, 0, -90))
+panel("Right", green, (2, 1, 2), (1, 1, 0), (0, 0, 90))
+panel("Emitter", lamp, (0.26, 1, 0.26), (0.36, 1.81, -0.52))
+panel("Lamp backing", shade, (0.38, 1, 0.38), (0.36, 1.80, -0.52), (180, 0, 0))
+
+camera = Camera("Indirect room")
+camera.position = float3(0, 0.88, 3.35)
+camera.target = float3(0, 0.72, -0.24)
+camera.up = float3(0, 1, 0)
+camera.focalLength = 50
+sceneBuilder.addCamera(camera)
+sceneBuilder.selectedCamera = camera

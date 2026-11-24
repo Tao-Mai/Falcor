@@ -39,13 +39,14 @@ namespace Mogwai
         AppData(const std::filesystem::path& path);
 
         const std::vector<std::filesystem::path>& getRecentScripts() const { return mRecentScripts; }
-        const std::vector<std::filesystem::path>& getRecentScenes() const { return mRecentScenes; }
+        std::vector<std::filesystem::path> getRecentScenes() const;
+        std::vector<std::filesystem::path> getAvailableScenes(const std::filesystem::path& resourceDirectory) const;
 
         void addRecentScript(const std::filesystem::path& path);
         void addRecentScene(const std::filesystem::path& path);
 
     private:
-        void addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path);
+        void addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path, size_t limit);
         void removeNonExistingPaths(std::vector<std::filesystem::path>& paths);
 
         void save();

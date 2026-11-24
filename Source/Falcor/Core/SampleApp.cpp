@@ -46,6 +46,7 @@
 #include <imgui.h>
 
 #include <fstream>
+#include <future>
 
 namespace Falcor
 {
@@ -62,22 +63,38 @@ SampleApp::SampleApp(const SampleAppConfig& config)
     if (config.pauseTime)
         mClock.pause();
 
-    // Create GPU device
-    mpDevice = make_ref<Device>(config.deviceDesc);
-    if (!config.shaderCompilationDatabase.empty())
-        mpDevice->getProgramManager()->setShaderCompilationDatabase(config.shaderCompilationDatabase);
+    const bool overlapStartup = config.deviceDesc.type == Device::Type::Vulkan && !config.deviceDesc.shaderModuleCachePath.empty();
+    std::error_code cacheStatus;
+    const bool warmStartup = overlapStartup && std::filesystem::is_directory(config.deviceDesc.shaderModuleCachePath, cacheStatus);
 
+    std::future<void> loadingPlugins;
+    if (overlapStartup && !Scripting::isRunning())
+        loadingPlugins = std::async(std::launch::async, [] { PluginManager::instance().loadAllPlugins(); });
+
+    std::future<ref<Device>> creatingDevice;
+    if (overlapStartup && !config.headless)
+        creatingDevice = std::async(std::launch::async, [desc = config.deviceDesc] { return make_ref<Device>(desc); });
+    else
+        mpDevice = make_ref<Device>(config.deviceDesc);
+
+    auto windowDesc = config.windowDesc;
     if (!config.headless)
     {
-        auto windowDesc = config.windowDesc;
         // Vulkan does not allow creating a swapchain on a minimized window.
         if (config.deviceDesc.type == Device::Type::Vulkan && windowDesc.mode == Window::WindowMode::Minimized)
             windowDesc.mode = Window::WindowMode::Normal;
 
-        // Create the window
         mpWindow = Window::create(windowDesc, this);
         mpWindow->setWindowIcon(getRuntimeDirectory() / "data/framework/nvidia.ico");
+    }
 
+    if (creatingDevice.valid())
+        mpDevice = creatingDevice.get();
+    if (!config.shaderCompilationDatabase.empty())
+        mpDevice->getProgramManager()->setShaderCompilationDatabase(config.shaderCompilationDatabase);
+
+    if (mpWindow)
+    {
         // Create swapchain
         Swapchain::Desc desc;
         desc.format = config.colorFormat;
@@ -88,7 +105,7 @@ SampleApp::SampleApp(const SampleAppConfig& config)
         mpSwapchain = make_ref<Swapchain>(mpDevice, desc, mpWindow->getApiHandle());
 
         // Show the progress bar (unless window is minimized)
-        if (windowDesc.mode != Window::WindowMode::Minimized)
+        if (windowDesc.mode != Window::WindowMode::Minimized && !warmStartup)
             mProgressBar.show("Initializing Falcor");
 
         // When not running headless, we want to show message boxes on error by default.
@@ -117,7 +134,10 @@ SampleApp::SampleApp(const SampleAppConfig& config)
     initUI();
     mpPixelZoom = std::make_unique<PixelZoom>(mpDevice, mpTargetFBO.get());
 
-    PluginManager::instance().loadAllPlugins();
+    if (loadingPlugins.valid())
+        loadingPlugins.get();
+    else
+        PluginManager::instance().loadAllPlugins();
 }
 
 SampleApp::~SampleApp()
@@ -168,16 +188,27 @@ int SampleApp::run()
 
 void SampleApp::handleWindowSizeChange()
 {
-    FALCOR_ASSERT(mpDevice && mpWindow && mpSwapchain);
+    // GLFW can notify us of the initial size before the swapchain is created.
+    if (!mpSwapchain)
+        return;
+    FALCOR_ASSERT(mpDevice && mpWindow);
 
     // Tell the device to resize the swap chain
     auto newSize = mpWindow->getClientAreaSize();
     uint32_t width = newSize.x;
     uint32_t height = newSize.y;
 
-    mpSwapchain->resize(width, height);
+    if (mpSwapchain->getDesc().width != width || mpSwapchain->getDesc().height != height)
+        mpSwapchain->resize(width, height);
 
-    resizeTargetFBO(width, height);
+    if (mpTargetFBO->getWidth() != width || mpTargetFBO->getHeight() != height)
+        resizeTargetFBO(width, height);
+    else
+    {
+        mRedrawRequested = true;
+        mRetriedPausedPresent = false;
+        onResize(width, height);
+    }
 }
 
 void SampleApp::handleRenderFrame()
@@ -535,8 +566,11 @@ void SampleApp::renderFrame()
         }
     }
 
-    // Render the UI.
-    renderUI();
+    // Let the startup graph reach the swapchain before building the first overlay.
+    const bool firstCachedWindowFrame =
+        mpWindow && mFrameRate.getFrameCount() == 1 && !mpDevice->getDesc().shaderModuleCachePath.empty();
+    if (!firstCachedWindowFrame)
+        renderUI();
 
     if (mpPixelZoom)
         mpPixelZoom->render(pRenderContext, mpTargetFBO.get());

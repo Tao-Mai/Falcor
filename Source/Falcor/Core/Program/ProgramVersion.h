@@ -300,6 +300,7 @@ protected:
     DefineList mDefines;
     ref<const ProgramReflection> mpReflector;
     std::string mName;
+    Slang::ComPtr<slang::ISession> mpSlangSession;
     Slang::ComPtr<slang::IComponentType> mpSlangGlobalScope;
     std::vector<Slang::ComPtr<slang::IComponentType>> mpSlangEntryPoints;
 

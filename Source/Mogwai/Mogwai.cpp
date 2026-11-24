@@ -28,6 +28,7 @@
 #include "Falcor.h"
 #include "Mogwai.h"
 #include "MogwaiSettings.h"
+#include "StartupShaderCache.h"
 #include "GlobalState.h"
 #include "Core/AssetResolver.h"
 #include "Scene/Importer.h"
@@ -103,21 +104,6 @@ namespace Mogwai
 
     void Renderer::onLoad(RenderContext* pRenderContext)
     {
-#if FALCOR_WINDOWS
-        if (auto windowsDirectory = getEnvironmentVariable("WINDIR"); getWindow() && windowsDirectory)
-        {
-            const auto fontPath = std::filesystem::path(*windowsDirectory) / "Fonts" / "msyh.ttc";
-            if (std::filesystem::is_regular_file(fontPath))
-            {
-                getGui().addFont("", fontPath, 18.f, true);
-                getGui().setActiveFont("");
-            }
-        }
-#endif
-
-        // Load all plugins
-        PluginManager::instance().loadAllPlugins();
-
         mpExtensions.push_back(MogwaiSettings::create(this));
         if (gExtensions)
         {
@@ -143,12 +129,11 @@ namespace Mogwai
             if (!mOptions.silentMode) mAppData.addRecentScript(mOptions.scriptFile);
         }
 
-        // Load pyscene provided via command line.
+        // Load the scene provided via command line.
         if (!mOptions.sceneFile.empty())
         {
             loadScene(mOptions.sceneFile);
-            // Add scene to recent files only if not in silent mode (which is used during image tests).
-            if (!mOptions.silentMode) mAppData.addRecentScene(mOptions.sceneFile);
+            if (!getWindow() && !mOptions.silentMode) mAppData.addRecentScene(mScenePath);
         }
     }
 
@@ -325,7 +310,6 @@ namespace Mogwai
         else if (std::any_of(Scene::getFileExtensionFilters().begin(), Scene::getFileExtensionFilters().end(), [&ext](FileDialogFilter f) {return f.ext == ext; }))
         {
             loadScene(path);
-            mAppData.addRecentScene(path);
         }
         else
         {
@@ -544,7 +528,6 @@ namespace Mogwai
         if (openFileDialog(Scene::getFileExtensionFilters(), path))
         {
             loadScene(path);
-            mAppData.addRecentScene(path);
         }
     }
 
@@ -559,6 +542,7 @@ namespace Mogwai
             {
                 TimeReport timeReport;
                 setScene(SceneBuilder(getDevice(), path, getSettings(), buildFlags).getScene());
+                if (getWindow() && !mOptions.silentMode) mAppData.addRecentScene(mScenePath);
                 timeReport.measure("Loading scene (total)");
                 timeReport.printToLog();
                 return;
@@ -591,9 +575,14 @@ namespace Mogwai
         mUpdateFlags = IScene::UpdateFlags::None;
 
         mpScene = pScene;
+        mScenePath.clear();
 
         if (mpScene)
         {
+            // The first import is the requested file. Later imports can be its dependencies.
+            const auto importPaths = mpScene->getImportPaths();
+            if (!importPaths.empty()) mScenePath = importPaths.front();
+
             mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
 
             const auto& pFbo = getRenderFbo();
@@ -693,6 +682,21 @@ namespace Mogwai
 
     void Renderer::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
     {
+#if FALCOR_WINDOWS
+        if (getWindow() && mWindowFrames < 2 && ++mWindowFrames == 2)
+        {
+            if (auto windowsDirectory = getEnvironmentVariable("WINDIR"))
+            {
+                const auto fontPath = std::filesystem::path(*windowsDirectory) / "Fonts" / "msyh.ttc";
+                if (std::filesystem::is_regular_file(fontPath))
+                {
+                    getGui().addFont("", fontPath, 18.f, true);
+                    getGui().setActiveFont("");
+                }
+            }
+        }
+#endif
+
         if (!mScriptPath.empty())
         {
             auto path = mScriptPath;
@@ -1081,6 +1085,7 @@ int runMain(int argc, char** argv)
     if (useSceneCacheFlag) options.useSceneCache = true;
     if (rebuildSceneCacheFlag) options.rebuildSceneCache = true;
 
+    Mogwai::StartupShaderCache startupShaderCache(config.deviceDesc);
     Mogwai::Renderer renderer(config, options);
     return renderer.run();
 }

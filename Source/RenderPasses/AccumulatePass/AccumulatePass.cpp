@@ -354,8 +354,9 @@ void AccumulatePass::setIScene(RenderContext* pRenderContext, const ref<IScene>&
     mUpdateFlagsConnection = {};
     mUpdateFlags = IScene::UpdateFlags::None;
 
-    mpScene = std::move(pScene);
-    mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
+    mpScene = pScene;
+    if (mpScene)
+        mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
 
     // Reset accumulation when the scene changes.
     reset();

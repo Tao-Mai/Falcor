@@ -152,7 +152,7 @@ public:
 private:
     struct ShaderCompilationDatabase;
 
-    SlangCompileRequest* createSlangCompileRequest(const Program& program) const;
+    SlangCompileRequest* createSlangCompileRequest(const Program& program, std::filesystem::path& moduleCachePath) const;
 
     Device* mpDevice;
 

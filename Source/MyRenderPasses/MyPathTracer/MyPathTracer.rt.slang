@@ -39,7 +39,7 @@ import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSamplerInterface;
 import Rendering.Lights.EmissiveUniformSampler;
-import Scene.Material.MaterialTypes;
+import MyRenderPasses.Shared.EmissiveLightHelpers;
 
 cbuffer CB
 {
@@ -264,31 +264,11 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     return mi.eval(sd, ls.dir, sg) * ls.Li * invPdf;
 }
 
-bool canSampleEmissiveLights(const ShadingData sd, const IMaterialInstance mi)
-{
-    return kUseEmissiveLights && gScene.lightCollection.getActiveTriangleCount() > 0 &&
-        (mi.getLobeTypes(sd) & uint(LobeType::NonDelta)) != 0;
-}
-
 // 两种策略各取一个样本，输入为立体角 PDF。
 float powerHeuristic(float pdf, float otherPdf)
 {
     float ratio = otherPdf / pdf;
     return 1.f / (1.f + ratio * ratio);
-}
-
-bool isMaskedLightSample(const TriangleLightSample light)
-{
-    const uint materialID = gScene.lightCollection.getTriangle(light.triangleIndex).materialID;
-    if (gScene.materials.getMaterialHeader(materialID).getAlphaMode() != AlphaMode::Mask)
-        return false;
-
-    const uint2 meshPrimitive = gScene.lightCollection.getSceneMeshPrimID(light.triangleIndex);
-    GeometryInstanceID instanceID;
-    instanceID.index = meshPrimitive.x;
-    const float3 barycentrics = float3(1.f - light.uv.x - light.uv.y, light.uv);
-    const VertexData vertex = gScene.getVertexData(instanceID, meshPrimitive.y, barycentrics);
-    return gScene.materials.alphaTest(vertex, materialID, 0.f);
 }
 
 float3 evalDirectEmissive(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg)
@@ -434,7 +414,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
         rayData.radiance += rayData.thp * Lr;
     }
 
-    const bool sampledEmissive = canSampleEmissiveLights(sd, mi);
+    const bool sampledEmissive = kUseEmissiveLights && (mi.getLobeTypes(sd) & uint(LobeType::NonDelta)) != 0;
     if (sampledEmissive)
         rayData.radiance += rayData.thp * evalDirectEmissive(sd, mi, rayData.sg);
 
@@ -491,7 +471,8 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
             rayOrigin = sd.computeRayOrigin();
         }
 
-        const bool sampledEmissive = kComputeDirect && canSampleEmissiveLights(sd, mi);
+        const bool sampledEmissive =
+            kComputeDirect && kUseEmissiveLights && (mi.getLobeTypes(sd) & uint(LobeType::NonDelta)) != 0;
         if (kComputeDirect)
         {
             // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
