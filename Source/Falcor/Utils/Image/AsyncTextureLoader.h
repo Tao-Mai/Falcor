@@ -97,7 +97,8 @@ public:
         bool loadAsSRGB,
         ResourceBindFlags bindFlags = ResourceBindFlags::ShaderResource,
         Bitmap::ImportFlags importFlags = Bitmap::ImportFlags::None,
-        LoadCallback callback = {}
+        LoadCallback callback = {},
+        fstd::span<const uint8_t> fileContents = {}
     );
 
 private:
@@ -113,6 +114,7 @@ private:
         ResourceBindFlags bindFlags;
         Bitmap::ImportFlags importFlags;
         LoadCallback callback;
+        fstd::span<const uint8_t> fileContents;
         std::promise<ref<Texture>> promise;
     };
 

@@ -345,6 +345,9 @@ target_sources(Falcor PRIVATE
     Scene/SceneBuilderDump.cpp
     Scene/SceneBuilderDump.h
     Scene/SceneCache.cpp
+    Scene/SceneMemoryCache.cpp
+    Scene/SceneMemoryCache.h
+    Scene/SceneMemoryCacheIPC.h
     Scene/SceneCache.h
     Scene/SceneDefines.slangh
     Scene/SceneIDs.h

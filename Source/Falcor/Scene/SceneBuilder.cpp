@@ -212,8 +212,17 @@ namespace Falcor
     }
 
     SceneBuilder::SceneBuilder(ref<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags flags)
+        : SceneBuilder(pDevice, path, settings, flags, {})
+    {}
+
+    SceneBuilder::SceneBuilder(
+        ref<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags flags, SceneMemoryCache::Config memoryCache
+    )
         : SceneBuilder(pDevice, settings, flags)
     {
+        mMemoryCache = memoryCache;
+        mMemoryCache.enabled = mMemoryCache.enabled && SceneMemoryCache::isSupported();
+
         std::filesystem::path resolvedPath = mAssetResolver.resolvePath(path, AssetCategory::Scene);
         if (resolvedPath.empty())
         {
@@ -228,13 +237,31 @@ namespace Falcor
         bool rebuildCache = is_set(flags, Flags::RebuildCache);
         mWriteSceneCache = useCache || rebuildCache;
 
+        if (mMemoryCache.enabled)
+        {
+            if (rebuildCache)
+                SceneMemoryCache::erase(mSceneCacheKey);
+            else if (auto scene = SceneMemoryCache::load(pDevice, mSceneCacheKey, mMemoryCache))
+            {
+                mpScene = std::move(scene);
+                return;
+            }
+        }
+
         // Try to load scene cache if supported, available and requested.
         if (useCache && !rebuildCache && SceneCache::hasValidCache(mSceneCacheKey))
         {
             try
             {
-                mpScene = Scene::create(pDevice, SceneCache::readCache(pDevice, mSceneCacheKey));
-                return;
+                auto data = SceneCache::readCache(pDevice, mSceneCacheKey);
+                if (!mMemoryCache.enabled || SceneMemoryCache::canUseDiskCache(data, mSceneCacheKey))
+                {
+                    if (mMemoryCache.enabled)
+                        SceneMemoryCache::store(data, mSceneCacheKey, mMemoryCache);
+                    mpScene = Scene::create(pDevice, std::move(data));
+                    return;
+                }
+                logInfo("Scene assets are newer than the disk cache. Importing from source.");
             }
             catch (const std::exception& e)
             {
@@ -395,6 +422,12 @@ namespace Falcor
         {
             SceneCache::writeCache(mSceneData, mSceneCacheKey);
             timeReport.measure("Writing cache");
+        }
+
+        if (mMemoryCache.enabled)
+        {
+            SceneMemoryCache::store(mSceneData, mSceneCacheKey, mMemoryCache);
+            timeReport.measure("Writing memory cache");
         }
 
         // Create the scene object.

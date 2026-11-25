@@ -225,6 +225,38 @@ namespace Mogwai
         if (!selectedPath.empty()) mpRenderer->loadScene(selectedPath);
     }
 
+    void MogwaiSettings::renderSceneMemoryCacheSettings(Gui::Window& w)
+    {
+        if (!SceneMemoryCache::isSupported())
+            return;
+
+        if (auto group = w.group("Scene Memory Cache"))
+        {
+            if (!mSceneMemoryCacheDraft)
+                mSceneMemoryCacheDraft = mpRenderer->getSceneMemoryCacheConfig();
+            auto& config = *mSceneMemoryCacheDraft;
+            group.checkbox("Enabled", config.enabled);
+            group.var("Memory limit (MiB)", config.limitMiB, 1u);
+            group.var("Idle expiration (seconds)", config.ttlSeconds, 1u);
+            if (group.button("Apply"))
+            {
+                try
+                {
+                    mpRenderer->setSceneMemoryCacheConfig(config);
+                    mSceneMemoryCacheStatus = "Settings saved";
+                }
+                catch (const std::exception& error)
+                {
+                    mSceneMemoryCacheStatus = error.what();
+                }
+            }
+            if (group.button("Clear All Cached Scenes"))
+                mSceneMemoryCacheStatus = SceneMemoryCache::clear() ? "Scene memory cache cleared" : "Unable to clear scene memory cache";
+            if (!mSceneMemoryCacheStatus.empty())
+                group.text(mSceneMemoryCacheStatus);
+        }
+    }
+
     void MogwaiSettings::renderGraphs(Gui::Window& w)
     {
         if (mpRenderer->mGraphs.empty()) return;
@@ -390,6 +422,7 @@ namespace Mogwai
             if (mShowTime) renderTimeSettings(w);
             if (mShowWinSize) renderWindowSettings(w);
             renderScenes();
+            renderSceneMemoryCacheSettings(w);
             if (mShowGraphUI) renderGraphs(w);
         }
         mpRenderer->getConsole().render(pGui, mShowConsole);

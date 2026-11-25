@@ -27,7 +27,9 @@
  **************************************************************************/
 #pragma once
 #include "Falcor.h"
+#include "Scene/SceneMemoryCache.h"
 #include <filesystem>
+#include <optional>
 
 namespace Mogwai
 {
@@ -44,6 +46,9 @@ namespace Mogwai
 
         void addRecentScript(const std::filesystem::path& path);
         void addRecentScene(const std::filesystem::path& path);
+
+        std::optional<Falcor::SceneMemoryCache::Config> loadSceneMemoryCacheConfig() const;
+        void saveSceneMemoryCacheConfig(const Falcor::SceneMemoryCache::Config& config) const;
 
     private:
         void addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path, size_t limit);

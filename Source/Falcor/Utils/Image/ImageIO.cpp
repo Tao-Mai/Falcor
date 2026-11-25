@@ -56,7 +56,7 @@ struct ImportData
     bool hasDX10Header = false;
 
     // Data to be imported
-    std::vector<uint8_t> imageData;
+    fstd::span<const uint8_t> imageData;
 };
 
 struct ExportData
@@ -520,15 +520,9 @@ void readDDSHeader(ImportData& data, const void* pHeaderData, size_t& headerSize
 }
 
 // Loads the information and data for the specified image. This function does not handle creation of the texture for the image.
-void loadDDS(const std::filesystem::path& path, bool loadAsSrgb, ImportData& data)
+void loadDDS(fstd::span<const uint8_t> bytes, bool loadAsSrgb, ImportData& data)
 {
-    MemoryMappedFile file(path, MemoryMappedFile::kWholeFile, MemoryMappedFile::AccessHint::SequentialScan);
-    if (!file.isOpen())
-    {
-        FALCOR_THROW("Failed to open file.");
-    }
-
-    if (file.getSize() < (sizeof(uint32_t) + sizeof(DDS_HEADER)))
+    if (bytes.size() < (sizeof(uint32_t) + sizeof(DDS_HEADER)))
     {
         FALCOR_THROW("Failed to read DDS header (file too small).");
     }
@@ -539,27 +533,31 @@ void loadDDS(const std::filesystem::path& path, bool loadAsSrgb, ImportData& dat
     size_t headerSize = maxHeaderSize;
 
     // The actual header size may be smaller than the max size; be sure not to read past the end of the file.
-    std::memcpy(header, file.getData(), std::min<size_t>(file.getSize(), headerSize));
+    std::memcpy(header, bytes.data(), std::min(bytes.size(), headerSize));
     readDDSHeader(data, header, headerSize, loadAsSrgb);
 
-    if (file.getSize() <= headerSize)
+    if (bytes.size() <= headerSize)
     {
         FALCOR_THROW("No image data after DDS header.");
     }
 
-    // Read image data.
-    size_t imageSize = file.getSize() - headerSize;
-    data.imageData.resize(imageSize);
-    std::memcpy(data.imageData.data(), reinterpret_cast<const uint8_t*>(file.getData()) + headerSize, imageSize);
+    data.imageData = bytes.subspan(headerSize);
 }
 } // namespace
 
 Bitmap::UniqueConstPtr ImageIO::loadBitmapFromDDS(const std::filesystem::path& path)
 {
+    MemoryMappedFile file(path, MemoryMappedFile::kWholeFile, MemoryMappedFile::AccessHint::SequentialScan);
+    if (!file.isOpen())
+    {
+        logWarning("Failed to open DDS image '{}'.", path);
+        return nullptr;
+    }
+
     ImportData data;
     try
     {
-        loadDDS(path, false, data);
+        loadDDS({reinterpret_cast<const uint8_t*>(file.getData()), file.getSize()}, false, data);
     }
     catch (const RuntimeError& e)
     {
@@ -579,10 +577,27 @@ Bitmap::UniqueConstPtr ImageIO::loadBitmapFromDDS(const std::filesystem::path& p
 
 ref<Texture> ImageIO::loadTextureFromDDS(ref<Device> pDevice, const std::filesystem::path& path, bool loadAsSrgb)
 {
+    MemoryMappedFile file(path, MemoryMappedFile::kWholeFile, MemoryMappedFile::AccessHint::SequentialScan);
+    if (!file.isOpen())
+    {
+        logWarning("Failed to open DDS image '{}'.", path);
+        return nullptr;
+    }
+
+    return loadTextureFromDDS(pDevice, {reinterpret_cast<const uint8_t*>(file.getData()), file.getSize()}, path, loadAsSrgb);
+}
+
+ref<Texture> ImageIO::loadTextureFromDDS(
+    ref<Device> pDevice,
+    fstd::span<const uint8_t> bytes,
+    const std::filesystem::path& path,
+    bool loadAsSrgb
+)
+{
     ImportData data;
     try
     {
-        loadDDS(path, loadAsSrgb, data);
+        loadDDS(bytes, loadAsSrgb, data);
     }
     catch (const RuntimeError& e)
     {

@@ -79,9 +79,14 @@ namespace Falcor
         static Scene::SceneData readCache(ref<Device> pDevice, const Key& key);
 
     private:
+        friend class SceneMemoryCache;
+
         class OutputStream;
         class InputStream;
 
+        using Images = std::map<std::filesystem::path, fstd::span<const uint8_t>>;
+        static void writeCacheStream(std::ostream& file, const Scene::SceneData& sceneData);
+        static Scene::SceneData readCacheStream(ref<Device> pDevice, std::istream& file, const Images* images = nullptr);
         static std::filesystem::path getCachePath(const Key& key);
 
         static void writeSceneData(OutputStream& stream, const Scene::SceneData& sceneData);

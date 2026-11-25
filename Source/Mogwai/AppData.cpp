@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "Falcor.h"
 #include "AppData.h"
+#include "Core/Platform/LockFile.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
@@ -100,6 +101,45 @@ namespace Mogwai
     void AppData::addRecentScene(const std::filesystem::path& path)
     {
         addRecentPath(mRecentScenes, path, mRecentScenes.max_size());
+    }
+
+    std::optional<SceneMemoryCache::Config> AppData::loadSceneMemoryCacheConfig() const
+    {
+        const auto path = mPath.parent_path() / "MogwaiSceneMemoryCache.json";
+        std::ifstream file(path);
+        if (!file)
+            return {};
+
+        try
+        {
+            const auto data = json::parse(file);
+            SceneMemoryCache::Config config;
+            config.enabled = data.value("enabled", config.enabled);
+            config.limitMiB = data.value("limitMiB", config.limitMiB);
+            config.ttlSeconds = data.value("ttlSeconds", config.ttlSeconds);
+            FALCOR_CHECK(config.limitMiB > 0 && config.ttlSeconds > 0, "Cache limit and expiration must be positive.");
+            return config;
+        }
+        catch (const std::exception& error)
+        {
+            logWarning("Failed to read settings from '{}': {}", path, error.what());
+            return {};
+        }
+    }
+
+    void AppData::saveSceneMemoryCacheConfig(const SceneMemoryCache::Config& config) const
+    {
+        const auto directory = mPath.parent_path();
+        LockFile lock(directory / "MogwaiSceneMemoryCache.lock");
+        FALCOR_CHECK(lock.lock(), "Could not lock the scene memory cache settings.");
+
+        const auto temporary = directory / "MogwaiSceneMemoryCache.json.tmp";
+        std::ofstream file(temporary);
+        const json data = {{"enabled", config.enabled}, {"limitMiB", config.limitMiB}, {"ttlSeconds", config.ttlSeconds}};
+        file << data.dump(4);
+        file.close();
+        FALCOR_CHECK(file.good(), "Could not save scene memory cache settings to '{}'.", temporary);
+        std::filesystem::rename(temporary, directory / "MogwaiSceneMemoryCache.json");
     }
 
     void AppData::addRecentPath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& path, size_t limit)

@@ -67,6 +67,12 @@ namespace Mogwai
         , mOptions(options)
         , mAppData(kAppDataPath)
     {
+        mSceneMemoryCache.enabled = options.useSceneCache;
+        mSceneMemoryCache = mAppData.loadSceneMemoryCacheConfig().value_or(mSceneMemoryCache);
+        mSceneMemoryCache.enabled = options.sceneMemoryCacheEnabled.value_or(mSceneMemoryCache.enabled) && SceneMemoryCache::isSupported();
+        mSceneMemoryCache.limitMiB = options.sceneMemoryCacheLimitMiB.value_or(mSceneMemoryCache.limitMiB);
+        mSceneMemoryCache.ttlSeconds = options.sceneMemoryCacheTtlSeconds.value_or(mSceneMemoryCache.ttlSeconds);
+
         if (getWindow())
             mpRenderFbo = Fbo::create2D(getDevice(), kRenderSize, kRenderSize, getTargetFbo()->getDesc());
         setActivePythonRenderGraphDevice(getDevice());
@@ -541,7 +547,7 @@ namespace Mogwai
             try
             {
                 TimeReport timeReport;
-                setScene(SceneBuilder(getDevice(), path, getSettings(), buildFlags).getScene());
+                setScene(SceneBuilder(getDevice(), path, getSettings(), buildFlags, mSceneMemoryCache).getScene());
                 if (getWindow() && !mOptions.silentMode) mAppData.addRecentScene(mScenePath);
                 timeReport.measure("Loading scene (total)");
                 timeReport.printToLog();
@@ -567,6 +573,15 @@ namespace Mogwai
     void Renderer::unloadScene()
     {
         setScene(nullptr);
+    }
+
+    void Renderer::setSceneMemoryCacheConfig(const SceneMemoryCache::Config& config)
+    {
+        FALCOR_CHECK(config.limitMiB > 0 && config.ttlSeconds > 0, "Cache limit and expiration must be positive.");
+        mAppData.saveSceneMemoryCacheConfig(config);
+        mSceneMemoryCache = config;
+        if (!SceneMemoryCache::configure(config))
+            logWarning("The scene memory cache host could not be updated. Settings will be applied on the next cache access.");
     }
 
     void Renderer::setScene(const ref<Scene>& pScene)
@@ -960,6 +975,11 @@ int runMain(int argc, char** argv)
     args::ValueFlag<uint32_t> heightFlag(parser, "pixels", "Initial window height.", {"height"});
     args::Flag useSceneCacheFlag(parser, "", "Use scene cache to improve scene load times.", {'c', "use-cache"});
     args::Flag rebuildSceneCacheFlag(parser, "", "Rebuild the scene cache.", {"rebuild-cache"});
+    args::Flag sceneMemoryCacheFlag(parser, "", "Enable the Windows scene memory cache.", {"scene-memory-cache"});
+    args::Flag disableSceneMemoryCacheFlag(parser, "", "Disable the scene memory cache for this run.", {"no-scene-memory-cache"});
+    args::ValueFlag<int64_t> memoryCacheLimitFlag(parser, "MiB", "Scene memory cache limit (default 4096 MiB).", {"scene-memory-cache-limit-mib"});
+    args::ValueFlag<int64_t> memoryCacheTtlFlag(parser, "seconds", "Scene memory cache idle expiration (default 1800 seconds).", {"scene-memory-cache-ttl-seconds"});
+    args::Flag clearSceneMemoryCacheFlag(parser, "", "Clear all cached scenes in memory and exit.", {"clear-scene-memory-cache"});
     args::Flag generateShaderDebugInfoFlag(parser, "", "Generate shader debug info.", {"debug-shaders"});
     args::Flag enableDebugLayerFlag(parser, "", "Enable debug layer (enabled by default in Debug build).", {"enable-debug-layer"});
     args::Flag preciseProgramFlag(parser, "", "Force all slang programs to run in precise mode", { "precise" });
@@ -1009,6 +1029,18 @@ int runMain(int argc, char** argv)
     {
         std::string logfile = args::get(logfileFlag);
         Logger::setLogFilePath(logfile);
+    }
+
+    if (clearSceneMemoryCacheFlag)
+        return SceneMemoryCache::clear() ? 0 : 1;
+
+    const auto isValidCacheSetting = [](int64_t value) { return value > 0 && value <= std::numeric_limits<uint32_t>::max(); };
+    if ((sceneMemoryCacheFlag && disableSceneMemoryCacheFlag) ||
+        (memoryCacheLimitFlag && !isValidCacheSetting(args::get(memoryCacheLimitFlag))) ||
+        (memoryCacheTtlFlag && !isValidCacheSetting(args::get(memoryCacheTtlFlag))))
+    {
+        std::cerr << "The scene memory cache flags conflict, or the cache limit or expiration is out of range." << std::endl;
+        return 1;
     }
 
     if (attributesFlag)
@@ -1084,6 +1116,9 @@ int runMain(int argc, char** argv)
     if (silentFlag) options.silentMode = true;
     if (useSceneCacheFlag) options.useSceneCache = true;
     if (rebuildSceneCacheFlag) options.rebuildSceneCache = true;
+    if (sceneMemoryCacheFlag || disableSceneMemoryCacheFlag) options.sceneMemoryCacheEnabled = bool(sceneMemoryCacheFlag);
+    if (memoryCacheLimitFlag) options.sceneMemoryCacheLimitMiB = uint32_t(args::get(memoryCacheLimitFlag));
+    if (memoryCacheTtlFlag) options.sceneMemoryCacheTtlSeconds = uint32_t(args::get(memoryCacheTtlFlag));
 
     Mogwai::StartupShaderCache startupShaderCache(config.deviceDesc);
     Mogwai::Renderer renderer(config, options);

@@ -26,6 +26,8 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+
+#include <fstd/span.h>
 #include "Core/Macros.h"
 #include "Core/Platform/OS.h"
 #include "Core/API/Formats.h"
@@ -92,6 +94,13 @@ public:
      * @return If loading was successful, a new object. Otherwise, nullptr.
      */
     static UniqueConstPtr createFromFile(const std::filesystem::path& path, bool isTopDown, ImportFlags importFlags = ImportFlags::None);
+
+    static UniqueConstPtr createFromMemory(
+        fstd::span<const uint8_t> data,
+        const std::filesystem::path& path,
+        bool isTopDown,
+        ImportFlags importFlags = ImportFlags::None
+    );
 
     /**
      * Store a memory buffer to a file.

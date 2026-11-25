@@ -194,10 +194,11 @@ TextureManager::CpuTextureHandle TextureManager::loadTexture(
     Bitmap::ImportFlags importFlags,
     const AssetResolver* assetResolver,
     size_t* loadedTextureCount,
-    const Object* owner
+    const Object* owner,
+    fstd::span<const uint8_t> fileContents
 )
 {
-    if (path.string().find("<UDIM>") != std::string::npos)
+    if (fileContents.empty() && path.string().find("<UDIM>") != std::string::npos)
     {
         CpuTextureHandle handle =
             loadUdimTexture(path, generateMipLevels, loadAsSRGB, bindFlags, async, importFlags, assetResolver, loadedTextureCount);
@@ -234,7 +235,11 @@ TextureManager::CpuTextureHandle TextureManager::loadTexture(
     // If we find <MIP> in the filename, locate all mip levels
     std::string filename = path.filename().string();
     auto mipPos = filename.find("<MIP>");
-    if (mipPos != std::string::npos)
+    if (!fileContents.empty())
+    {
+        paths.push_back(path);
+    }
+    else if (mipPos != std::string::npos)
     {
         while (true)
         {
@@ -269,7 +274,7 @@ TextureManager::CpuTextureHandle TextureManager::loadTexture(
     }
     else
     {
-        if (mUseDeferredLoading)
+        if (mUseDeferredLoading && fileContents.empty())
         {
             // Add new texture desc.
             TextureDesc desc = {TextureState::Referenced, nullptr};
@@ -319,7 +324,7 @@ TextureManager::CpuTextureHandle TextureManager::loadTexture(
         }
         else
         {
-            mAsyncTextureLoader.loadFromFile(paths[0], generateMipLevels, loadAsSRGB, bindFlags, importFlags, callback);
+            mAsyncTextureLoader.loadFromFile(paths[0], generateMipLevels, loadAsSRGB, bindFlags, importFlags, callback, fileContents);
         }
 #else
         // Load texture from main thread.
@@ -330,7 +335,7 @@ TextureManager::CpuTextureHandle TextureManager::loadTexture(
         }
         else
         {
-            pTexture = Texture::createFromFile(mpDevice, paths[0], generateMipLevels, loadAsSRGB, bindFlags, importFlags);
+            pTexture = Texture::createFromFile(mpDevice, paths[0], generateMipLevels, loadAsSRGB, bindFlags, importFlags, fileContents);
         }
 
         // Add new texture desc.

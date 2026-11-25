@@ -21,4 +21,13 @@ target_sources(Mogwai PRIVATE
 
 target_link_libraries(Mogwai PRIVATE args)
 
+if(WIN32)
+    add_executable(MogwaiSceneCacheHost SceneMemoryCacheHost.cpp)
+    target_compile_features(MogwaiSceneCacheHost PRIVATE cxx_std_17)
+    target_include_directories(MogwaiSceneCacheHost PRIVATE ../Falcor)
+    target_link_libraries(MogwaiSceneCacheHost PRIVATE advapi32)
+    set_target_properties(MogwaiSceneCacheHost PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${FALCOR_RUNTIME_OUTPUT_DIRECTORY})
+    add_dependencies(Mogwai MogwaiSceneCacheHost)
+endif()
+
 target_source_group(Mogwai "/")

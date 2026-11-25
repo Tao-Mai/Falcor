@@ -52,20 +52,17 @@ namespace Falcor
 namespace
 {
 
-/// Wraps MemoryMappedFile in an OpenEXR interface
+/// Wraps image bytes in an OpenEXR interface.
 class OpenExrStream : public Imf::IStream
 {
 public:
-    OpenExrStream(const MemoryMappedFile& file) : Imf::IStream(""), mFile(file)
-    {
-        mFileData = reinterpret_cast<const uint8_t*>(mFile.getData());
-    }
+    OpenExrStream(fstd::span<const uint8_t> data) : Imf::IStream(""), mData(data) {}
 
     virtual bool read(char c[/*n*/], int n)
     {
-        if (mOffset + size_t(n) > mFile.getSize())
+        if (n < 0 || mOffset > mData.size() || size_t(n) > mData.size() - mOffset)
             return false;
-        memcpy(c, mFileData + mOffset, n);
+        memcpy(c, mData.data() + mOffset, n);
         mOffset += n;
         return true;
     }
@@ -77,14 +74,13 @@ public:
     virtual void clear() {}
 
 private:
-    const MemoryMappedFile& mFile;
-    const uint8_t* mFileData;
+    fstd::span<const uint8_t> mData;
     size_t mOffset = 0;
 };
 
-bool isFloat16Exr(const MemoryMappedFile& inputFile)
+bool isFloat16Exr(fstd::span<const uint8_t> data)
 {
-    OpenExrStream stream(inputFile);
+    OpenExrStream stream(data);
     Imf::InputFile imfFile(stream);
     const Imf::ChannelList& channels = imfFile.header().channels();
     for (auto it = channels.begin(); it != channels.end(); ++it)
@@ -300,9 +296,36 @@ Bitmap::UniqueConstPtr Bitmap::createFromFile(const std::filesystem::path& path,
         return nullptr;
     }
 
-    FREE_IMAGE_FORMAT fifFormat = FIF_UNKNOWN;
+    MemoryMappedFile file(path, MemoryMappedFile::kWholeFile, MemoryMappedFile::AccessHint::SequentialScan);
+    if (!file.isOpen())
+    {
+        genWarning("Can't open image file", path);
+        return nullptr;
+    }
 
-    fifFormat = FreeImage_GetFileType(path.string().c_str(), 0);
+    return createFromMemory({reinterpret_cast<const uint8_t*>(file.getData()), file.getSize()}, path, isTopDown, importFlags);
+}
+
+Bitmap::UniqueConstPtr Bitmap::createFromMemory(
+    fstd::span<const uint8_t> data,
+    const std::filesystem::path& path,
+    bool isTopDown,
+    ImportFlags importFlags
+)
+{
+    if (data.empty() || data.size() > std::numeric_limits<DWORD>::max())
+    {
+        genWarning("Invalid image size", path);
+        return nullptr;
+    }
+
+    std::unique_ptr<FIMEMORY, decltype(&FreeImage_CloseMemory)> memory(
+        FreeImage_OpenMemory(const_cast<BYTE*>(data.data()), static_cast<DWORD>(data.size())), FreeImage_CloseMemory
+    );
+    if (!memory)
+        return nullptr;
+
+    FREE_IMAGE_FORMAT fifFormat = FreeImage_GetFileTypeFromMemory(memory.get(), 0);
     if (fifFormat == FIF_UNKNOWN)
     {
         // Can't get the format from the file. Use file extension
@@ -322,24 +345,15 @@ Bitmap::UniqueConstPtr Bitmap::createFromFile(const std::filesystem::path& path,
         return nullptr;
     }
 
-    // Read file using memory mapped access which is much faster than regular file IO.
-    MemoryMappedFile file(path, MemoryMappedFile::kWholeFile, MemoryMappedFile::AccessHint::SequentialScan);
-    if (!file.isOpen())
-    {
-        genWarning("Can't open image file {}", path);
-        return nullptr;
-    }
-
     if (fifFormat == FIF_EXR)
     {
-        if (isFloat16Exr(file))
+        if (isFloat16Exr(data))
             importFlags |= ImportFlags::ConvertToFloat16;
     }
 
-    FIMEMORY* memory = FreeImage_OpenMemory((BYTE*)file.getData(), file.getSize());
-    FIBITMAP* pDib = FreeImage_LoadFromMemory(fifFormat, memory);
-    FreeImage_CloseMemory(memory);
-    file.close();
+    FreeImage_SeekMemory(memory.get(), 0, SEEK_SET);
+    FIBITMAP* pDib = FreeImage_LoadFromMemory(fifFormat, memory.get());
+    memory.reset();
 
     if (pDib == nullptr)
     {

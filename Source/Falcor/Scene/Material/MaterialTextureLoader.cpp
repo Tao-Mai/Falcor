@@ -39,7 +39,12 @@ MaterialTextureLoader::~MaterialTextureLoader()
     assignTextures();
 }
 
-void MaterialTextureLoader::loadTexture(const ref<Material>& pMaterial, Material::TextureSlot slot, const std::filesystem::path& path)
+void MaterialTextureLoader::loadTexture(
+    const ref<Material>& pMaterial,
+    Material::TextureSlot slot,
+    const std::filesystem::path& path,
+    fstd::span<const uint8_t> fileContents
+)
 {
     FALCOR_ASSERT(pMaterial);
     if (!pMaterial->hasTextureSlot(slot))
@@ -64,7 +69,8 @@ void MaterialTextureLoader::loadTexture(const ref<Material>& pMaterial, Material
         Bitmap::ImportFlags::None,
         nullptr /*search dirs*/,
         nullptr /*load count*/,
-        pMaterial.get()
+        pMaterial.get(),
+        fileContents
     );
 
     // Store assignment to material for later.

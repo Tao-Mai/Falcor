@@ -53,7 +53,12 @@ public:
         \param[in] slot Slot to load texture into.
         \param[in] path Texture file path.
     */
-    void loadTexture(const ref<Material>& pMaterial, Material::TextureSlot slot, const std::filesystem::path& path);
+    void loadTexture(
+        const ref<Material>& pMaterial,
+        Material::TextureSlot slot,
+        const std::filesystem::path& path,
+        fstd::span<const uint8_t> fileContents = {}
+    );
 
     void finishLoading() { assignTextures(); }
 

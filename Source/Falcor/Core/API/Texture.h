@@ -192,7 +192,8 @@ public:
         bool generateMipLevels,
         bool loadAsSrgb,
         ResourceBindFlags bindFlags = ResourceBindFlags::ShaderResource,
-        Bitmap::ImportFlags importFlags = Bitmap::ImportFlags::None
+        Bitmap::ImportFlags importFlags = Bitmap::ImportFlags::None,
+        fstd::span<const uint8_t> fileContents = {}
     );
 
     gfx::ITextureResource* getGfxTextureResource() const { return mGfxTextureResource; }

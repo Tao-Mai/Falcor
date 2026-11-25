@@ -89,6 +89,12 @@ public:
      * @return Texture object containing image data if loading was successful. Otherwise, nullptr.
      */
     static ref<Texture> loadTextureFromDDS(ref<Device> pDevice, const std::filesystem::path& path, bool loadAsSrgb);
+    static ref<Texture> loadTextureFromDDS(
+        ref<Device> pDevice,
+        fstd::span<const uint8_t> bytes,
+        const std::filesystem::path& path,
+        bool loadAsSrgb
+    );
 
     /**
      * Saves a bitmap to a DDS file.

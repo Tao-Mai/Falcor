@@ -68,11 +68,12 @@ std::future<ref<Texture>> AsyncTextureLoader::loadFromFile(
     bool loadAsSrgb,
     ResourceBindFlags bindFlags,
     Bitmap::ImportFlags importFlags,
-    LoadCallback callback
+    LoadCallback callback,
+    fstd::span<const uint8_t> fileContents
 )
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    mLoadRequestQueue.push(LoadRequest{{path}, generateMipLevels, loadAsSrgb, bindFlags, importFlags, callback});
+    mLoadRequestQueue.push(LoadRequest{{path}, generateMipLevels, loadAsSrgb, bindFlags, importFlags, callback, fileContents});
     mCondition.notify_one();
     return mLoadRequestQueue.back().promise.get_future();
 }
@@ -137,7 +138,8 @@ void AsyncTextureLoader::runWorker()
         if (request.paths.size() == 1)
         {
             pTexture = Texture::createFromFile(
-                mpDevice, request.paths[0], request.generateMipLevels, request.loadAsSRGB, request.bindFlags, request.importFlags
+                mpDevice, request.paths[0], request.generateMipLevels, request.loadAsSRGB, request.bindFlags, request.importFlags,
+                request.fileContents
             );
         }
         else

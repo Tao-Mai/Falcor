@@ -28,6 +28,7 @@
 #pragma once
 #include "Scene.h"
 #include "SceneCache.h"
+#include "SceneMemoryCache.h"
 #include "SceneIDs.h"
 #include "Transform.h"
 #include "TriangleMesh.h"
@@ -335,6 +336,9 @@ namespace Falcor
             Throws an ImporterError if importing went wrong.
         */
         SceneBuilder(ref<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags flags = Flags::Default);
+        SceneBuilder(
+            ref<Device> pDevice, const std::filesystem::path& path, const Settings& settings, Flags flags, SceneMemoryCache::Config memoryCache
+        );
 
         /** Create a new builder and import a scene/model from memory.
             Throws an ImporterError if importing went wrong.
@@ -777,6 +781,7 @@ namespace Falcor
         ref<Scene> mpScene;
         SceneCache::Key mSceneCacheKey;
         bool mWriteSceneCache = false;  ///< True if scene cache should be written after import.
+        SceneMemoryCache::Config mMemoryCache;
 
         SceneGraph mSceneGraph;
 

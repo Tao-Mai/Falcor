@@ -58,6 +58,21 @@ Using `--silent` together with `--script` allows to run Mogwai for rendering in 
 
 If you start it without specifying any options, Mogwai starts with a blank screen.
 
+## 场景内存缓存
+
+Windows 上，启用 `--use-cache` 后默认也会使用场景内存缓存。Mogwai 首次写入缓存时自动启动同目录下的 `MogwaiSceneCacheHost.exe`。宿主在共享内存里保存序列化场景、材质贴图和环境图。关闭并重新打开 Mogwai 后，同一用户会话可以继续读取缓存。
+
+默认上限为 **4096 MiB**，默认闲置过期时间为 **1800 秒（30 分钟）**。读取缓存会刷新最近使用时间。到期的条目由宿主清理，空间不足时优先淘汰最久未用的条目。宿主在缓存为空且闲置后自动退出。源场景或引用文件改动后，相关条目在下次读取时失效。
+
+在右侧控制区展开 **Scene Memory Cache**，可以启用或关闭功能、修改上限和过期时间。点击 **Apply** 保存。点击 **Clear All Cached Scenes** 清空共享内存里的场景。
+
+```powershell
+.\Mogwai.exe --device-type vulkan --use-cache --scene-memory-cache-limit-mib 4096 --scene-memory-cache-ttl-seconds 1800
+.\Mogwai.exe --clear-scene-memory-cache
+```
+
+`--scene-memory-cache` 与 `--no-scene-memory-cache` 可以覆盖本次运行的启用状态。`--rebuild-cache` 会重建当前场景的缓存。
+
 ## Remote Falcor editor
 
 Open the checkout on the Linux render server in CLion and run **Falcor Remote**. It builds `FalcorRemoteServer`, loads `MinimalPathTracer` and the Cornell box, and waits for a viewer on port 9000. Rendering starts on connection and stops on disconnect. Set `--script` and `--scene` for other content. `--fps` sets the stream cap and defaults to 60.

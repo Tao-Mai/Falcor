@@ -51,6 +51,7 @@ namespace Mogwai
         void renderMainMenu(Gui* pGui);
         void renderOverlay(Gui* pGui);
         void renderScenes();
+        void renderSceneMemoryCacheSettings(Gui::Window& w);
         void renderGraphs(Gui::Window& w);
         void renderTimeSettings(Gui::Window& w);
         void renderWindowSettings(Gui::Window& w);
@@ -65,6 +66,8 @@ namespace Mogwai
         bool mShowTime = false;
         bool mShowWinSize = false;
         std::optional<std::vector<std::filesystem::path>> mAvailableScenes;
+        std::optional<SceneMemoryCache::Config> mSceneMemoryCacheDraft;
+        std::string mSceneMemoryCacheStatus;
         uint2 mMousePosition;
     };
 }

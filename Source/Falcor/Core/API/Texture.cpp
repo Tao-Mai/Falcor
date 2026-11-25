@@ -373,10 +373,11 @@ ref<Texture> Texture::createFromFile(
     bool generateMipLevels,
     bool loadAsSrgb,
     ResourceBindFlags bindFlags,
-    Bitmap::ImportFlags importFlags
+    Bitmap::ImportFlags importFlags,
+    fstd::span<const uint8_t> fileContents
 )
 {
-    if (!std::filesystem::exists(path))
+    if (fileContents.empty() && !std::filesystem::exists(path))
     {
         logWarning("Error when loading image file. File '{}' does not exist.", path);
         return nullptr;
@@ -388,12 +389,14 @@ ref<Texture> Texture::createFromFile(
     {
         if (!topDown)
         {
-            logWarning("Error when loading ''. DDS loader requires top-down layout.", path);
+            logWarning("Error when loading '{}'. DDS loader requires top-down layout.", path);
             return nullptr;
         }
         try
         {
-            pTex = ImageIO::loadTextureFromDDS(pDevice, path, loadAsSrgb);
+            pTex = fileContents.empty()
+                ? ImageIO::loadTextureFromDDS(pDevice, path, loadAsSrgb)
+                : ImageIO::loadTextureFromDDS(pDevice, fileContents, path, loadAsSrgb);
         }
         catch (const std::exception& e)
         {
@@ -402,7 +405,9 @@ ref<Texture> Texture::createFromFile(
     }
     else
     {
-        Bitmap::UniqueConstPtr pBitmap = Bitmap::createFromFile(path, topDown, importFlags);
+        Bitmap::UniqueConstPtr pBitmap = fileContents.empty()
+            ? Bitmap::createFromFile(path, topDown, importFlags)
+            : Bitmap::createFromMemory(fileContents, path, topDown, importFlags);
         if (pBitmap)
         {
             ResourceFormat texFormat = pBitmap->getFormat();

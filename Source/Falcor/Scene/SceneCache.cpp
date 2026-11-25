@@ -137,11 +137,20 @@ namespace Falcor
     class SceneCache::InputStream
     {
     public:
-        InputStream(std::istream& stream) : mStream(stream) {}
+        InputStream(std::istream& stream, const Images* images) : mStream(stream), mpImages(images) {}
 
         void read(void* data, size_t len)
         {
-            mStream.read(reinterpret_cast<char*>(data), len);
+            if (len)
+            {
+                mStream.read(reinterpret_cast<char*>(data), len);
+                FALCOR_CHECK(mStream.good(), "Unexpected end of scene cache.");
+            }
+        }
+
+        fstd::span<const uint8_t> getImage(const std::filesystem::path& path) const
+        {
+            return mpImages ? mpImages->at(path) : fstd::span<const uint8_t>{};
         }
 
         template<typename T>
@@ -213,6 +222,7 @@ namespace Falcor
 
     private:
         std::istream& mStream;
+        const Images* mpImages;
     };
 
     bool SceneCache::hasValidCache(const Key& key)
@@ -241,19 +251,28 @@ namespace Falcor
 
         // Open file.
         std::ofstream fs(cachePath.c_str(), std::ios_base::binary);
-        if (fs.bad()) FALCOR_THROW("Failed to create scene cache file '{}'.", cachePath);
+        if (!fs) FALCOR_THROW("Failed to create scene cache file '{}'.", cachePath);
+        writeCacheStream(fs, sceneData);
+        fs.close();
+        if (!fs) FALCOR_THROW("Failed to write scene cache file to '{}'.", cachePath);
+    }
 
+    void SceneCache::writeCacheStream(std::ostream& file, const Scene::SceneData& sceneData)
+    {
         // Write header (uncompressed).
         Header header;
         std::memcpy(header.magic, kMagic, sizeof(Header::magic));
         header.version = kVersion;
-        fs.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        file.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
         // Write cache (compressed).
-        lz4_stream::basic_ostream<kBlockSize> zs(fs);
-        OutputStream stream(zs);
-        writeSceneData(stream, sceneData);
-        if (fs.bad()) FALCOR_THROW("Failed to write scene cache file to '{}'.", cachePath);
+        {
+            lz4_stream::basic_ostream<kBlockSize> zs(file);
+            OutputStream stream(zs);
+            writeSceneData(stream, sceneData);
+            FALCOR_CHECK(zs.good(), "Failed to compress the scene cache.");
+        }
+        FALCOR_CHECK(file.good(), "Failed to write the scene cache.");
     }
 
     Scene::SceneData SceneCache::readCache(ref<Device> pDevice, const Key& key)
@@ -264,19 +283,21 @@ namespace Falcor
 
         // Open file.
         std::ifstream fs(cachePath.c_str(), std::ios_base::binary);
-        if (fs.bad()) FALCOR_THROW("Failed to open scene cache file '{}'.", cachePath);
+        if (!fs) FALCOR_THROW("Failed to open scene cache file '{}'.", cachePath);
+        return readCacheStream(pDevice, fs);
+    }
 
+    Scene::SceneData SceneCache::readCacheStream(ref<Device> pDevice, std::istream& file, const Images* images)
+    {
         // Read header (uncompressed).
         Header header;
-        fs.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!header.isValid()) FALCOR_THROW("Invalid header in scene cache file '{}'.", cachePath);
+        file.read(reinterpret_cast<char*>(&header), sizeof(header));
+        FALCOR_CHECK(file.good() && header.isValid(), "Invalid scene cache header.");
 
         // Read cache (compressed).
-        lz4_stream::basic_istream<kBlockSize, kBlockSize> zs(fs);
-        InputStream stream(zs);
-        auto sceneData = readSceneData(stream, pDevice);
-        if (fs.bad()) FALCOR_THROW("Failed to read scene cache file from '{}'.", cachePath);
-        return sceneData;
+        lz4_stream::basic_istream<kBlockSize, kBlockSize> zs(file);
+        InputStream stream(zs, images);
+        return readSceneData(stream, pDevice);
     }
 
     std::filesystem::path SceneCache::getCachePath(const Key& key)
@@ -785,7 +806,7 @@ namespace Falcor
             if (hasTexture)
             {
                 auto path = stream.read<std::filesystem::path>();
-                materialTextureLoader.loadTexture(pMaterial, slot, path);
+                materialTextureLoader.loadTexture(pMaterial, slot, path, stream.getImage(path));
             }
         };
 
@@ -915,7 +936,10 @@ namespace Falcor
     ref<EnvMap> SceneCache::readEnvMap(InputStream& stream, ref<Device> pDevice)
     {
         auto path = stream.read<std::filesystem::path>();
-        auto pEnvMap = EnvMap::createFromFile(pDevice, path);
+        auto pTexture = Texture::createFromFile(
+            pDevice, path, true, false, ResourceBindFlags::ShaderResource, Bitmap::ImportFlags::None, stream.getImage(path)
+        );
+        auto pEnvMap = pTexture ? EnvMap::create(pDevice, pTexture) : nullptr;
         if (!pEnvMap) FALCOR_THROW("Failed to load environment map");
         stream.read(pEnvMap->mData);
         stream.read(pEnvMap->mRotation);

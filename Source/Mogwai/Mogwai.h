@@ -87,6 +87,9 @@ namespace Mogwai
             bool silentMode = false;
             bool useSceneCache = false;
             bool rebuildSceneCache = false;
+            std::optional<bool> sceneMemoryCacheEnabled;
+            std::optional<uint32_t> sceneMemoryCacheLimitMiB;
+            std::optional<uint32_t> sceneMemoryCacheTtlSeconds;
         };
 
         using KeyCallback = std::function<bool(bool pressed, uint32_t key)>;
@@ -121,6 +124,8 @@ namespace Mogwai
         static constexpr uint32_t kMinorVersion = 1;
 
         AppData& getAppData() { return mAppData; }
+        const SceneMemoryCache::Config& getSceneMemoryCacheConfig() const { return mSceneMemoryCache; }
+        void setSceneMemoryCacheConfig(const SceneMemoryCache::Config& config);
 
         RenderGraph* getActiveGraph() const;
 
@@ -202,6 +207,7 @@ namespace Mogwai
         void clearFilteredAttributes();
 
         AppData mAppData;
+        SceneMemoryCache::Config mSceneMemoryCache;
 
         std::vector<GraphData> mGraphs;
         uint32_t mActiveGraph = 0;

@@ -180,7 +180,8 @@ public:
         Bitmap::ImportFlags importFlags = Bitmap::ImportFlags::None,
         const AssetResolver* assetResolver = nullptr,
         size_t* loadedTextureCount = nullptr,
-        const Object* owner = nullptr
+        const Object* owner = nullptr,
+        fstd::span<const uint8_t> fileContents = {}
     );
 
     /**
